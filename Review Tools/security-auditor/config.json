@@ -1,0 +1,14 @@
+{
+  "models": {
+    "basic": "Haiku",
+    "advanced": "Sonnet"
+  },
+  "diff": {
+    "baseRef": "HEAD",
+    "untrackedMaxBytes": 100000
+  },
+  "scope": {
+    "maxRelatedFiles": 5,
+    "maxRelationshipHops": 1
+  }
+}
