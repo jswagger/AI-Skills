@@ -7,6 +7,27 @@
     "baseRef": "HEAD",
     "untrackedMaxBytes": 100000
   },
+  "scan": {
+    "exclude": [
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      "*.md",
+      "*.tsbuildinfo",
+      "*.snap"
+    ],
+    "testFiles": {
+      "mode": "lower-confidence",
+      "patterns": [
+        "*.test.*",
+        "*.spec.*",
+        "**/__tests__/**",
+        "**/test/**",
+        "**/tests/**"
+      ]
+    },
+    "projectStack": "unknown"
+  },
   "scope": {
     "maxRelatedFiles": 5,
     "maxRelationshipHops": 1

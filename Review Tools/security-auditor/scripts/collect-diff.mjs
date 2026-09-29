@@ -3,9 +3,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { createFileFilters } from './file-filters.mjs';
 
 const configPath = new URL('../config.json', import.meta.url);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
+const { isExcluded } = createFileFilters(config.scan);
 const args = process.argv.slice(2);
 const baseRef = args[0] ?? config.diff.baseRef ?? 'HEAD';
 const maxUntrackedBytes = config.diff.untrackedMaxBytes ?? 100000;
@@ -79,6 +81,7 @@ function collectUntracked() {
   const skipped = [];
 
   for (const path of paths) {
+    if (isExcluded(path)) continue;
     try {
       const content = readFileSync(path);
       if (content.length > maxUntrackedBytes || content.includes(0)) {
@@ -101,7 +104,7 @@ function collectUntracked() {
 
 try {
   const diffText = runGit(['diff', '--no-ext-diff', '--unified=0', baseRef, '--']);
-  const files = parseDiff(diffText);
+  const files = parseDiff(diffText).filter((file) => !isExcluded(file.path));
   const untracked = collectUntracked();
   const trackedPaths = new Set(files.map((file) => file.path));
 

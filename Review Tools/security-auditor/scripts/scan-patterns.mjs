@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs';
+import { createFileFilters } from './file-filters.mjs';
+
+const configPath = new URL('../config.json', import.meta.url);
+const config = JSON.parse(readFileSync(configPath, 'utf8'));
+const { isExcluded, isTestFile } = createFileFilters(config.scan);
+
 const input = await new Promise((resolve, reject) => {
   let data = '';
   process.stdin.setEncoding('utf8');
@@ -17,23 +24,25 @@ const rules = [
   {
     id: 'CRIT-102',
     description: 'Possible blacklist-style input filtering',
-    pattern: /\.(?:replace|replaceAll)\s*\(.*(?:<|>|['";]|\\x3[cC])/,
+    pattern: /\.(?:replace|replaceAll)\s*\(\s*(?:(['"`])(?:\\.|(?!\1)[^\\])*?(?:<|>|&|(?!\1)["']|\\["']|\\x3[cCeE]|\\x26|\\x22|\\x27)(?:\\.|(?!\1)[^\\])*?\1|\/(?:\\.|[^/\n])*?(?:<|>|&|"|'|\\x3[cCeE]|\\x26|\\x22|\\x27)(?:\\.|[^/\n])*?\/[gimsuy]*)/,
   },
   {
     id: 'CRIT-201',
     description: 'Possible hard-coded credential or secret assignment',
-    pattern: /\b(?:api[_-]?key|secret|password|passwd|token|credential|private[_-]?key|jwt[_-]?secret)\b\s*[:=]\s*(['"`])[^\s]+/i,
+    pattern: /(?:^|[^A-Za-z])(?:api[_-]?key|secret|password|passwd|token|credential|private[_-]?key|jwt[_-]?secret)\b\s*[:=]\s*(['"`])[^\s]+/i,
     redact: true,
   },
   {
     id: 'CRIT-202',
     description: 'Predictable random source near a security-sensitive identifier',
     pattern: /(?=.*\b(?:token|secret|session|auth|nonce|key|password|credential|id)\b)(?=.*\b(?:Math\.random|random\.random|rand\s*\())/i,
+    stackSensitive: true,
   },
   {
     id: 'CRIT-203',
     description: 'Possible unauthenticated CBC encryption usage',
     pattern: /\b(?:aes[-_]?\d+-cbc|createCipheriv\s*\(\s*['"`]aes-\d+-cbc)/i,
+    stackSensitive: true,
   },
   {
     id: 'CRIT-301',
@@ -53,7 +62,8 @@ const rules = [
   {
     id: 'ARCH-403',
     description: 'Possible wildcard or administrator-level permission',
-    pattern: /(?:['"`]\*['"`]|\b(?:db_owner|root|administrator|admin)\b)/i,
+    pattern: /\b(?:role|permission|scope|policy|grant)\b.{0,80}(?:['"`]\*['"`]|\b(?:db_owner|root|administrator|admin)\b)|(?:['"`]\*['"`]|\b(?:db_owner|root|administrator|admin)\b).{0,80}\b(?:role|permission|scope|policy|grant)\b/i,
+    stackSensitive: true,
   },
   {
     id: 'ARCH-404',
@@ -75,6 +85,9 @@ try {
 
 const candidates = [];
 for (const file of report.files) {
+  if (isExcluded(file.path)) continue;
+  const testFile = isTestFile(file.path);
+  if (testFile && config.scan?.testFiles?.mode === 'skip') continue;
   for (const change of file.changes ?? []) {
     if (change.side !== 'added') continue;
     for (const rule of rules) {
@@ -85,6 +98,12 @@ for (const file of report.files) {
         line: change.line,
         description: rule.description,
         evidence: rule.redact ? '[possible secret value omitted]' : change.text.trim().slice(0, 240),
+        ...(testFile && config.scan?.testFiles?.mode === 'lower-confidence'
+          ? { confidence: 'lower' }
+          : {}),
+        ...(config.scan?.projectStack === 'frontend' && rule.stackSensitive
+          ? { reviewPriority: 'lower' }
+          : {}),
       });
     }
   }

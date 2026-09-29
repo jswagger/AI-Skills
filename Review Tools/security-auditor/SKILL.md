@@ -12,6 +12,8 @@ Review additions and revisions for security vulnerabilities and risky patterns. 
 
 Read [config.json](./config.json) before starting. `models.basic` and `models.advanced` name the preferred model roles (Haiku and Sonnet by default). Use those models for their respective passes when the agent environment supports model selection. If it does not, continue with the available model and do not claim that another model was used.
 
+`scan.exclude` patterns are omitted by collection and scanning. `scan.testFiles.mode` may be `skip` or `lower-confidence`; test-path matches are lower-confidence by default. `scan.projectStack` describes the repository as `frontend`, `backend`, `full-stack`, or `unknown`. In a frontend repository, lower-priority crypto and broad-permission candidates should be assessed in context, not discarded: raise their priority when the changed code actually implements cryptography, server-side authorization, or service-account permissions.
+
 ## Procedure
 
 1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](./scripts/collect-diff.mjs). For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
@@ -32,6 +34,7 @@ Read [config.json](./config.json) before starting. `models.basic` and `models.ad
    - **ARCH-403:** over-privileged service accounts, integrations, or infrastructure permissions.
    - **ARCH-404:** fail-open authorization or validation where errors, timeouts, or missing permissions permit execution.
    - Perimeter-only security with unprotected internal boundaries; centralized or monolithic authorization that leaves paths unchecked; server-memory sessions incompatible with distributed deployment; blocking identity-provider calls on every internal request; and multiple service contexts sharing database tables.
+   - Use `scan.projectStack` as a relevance hint. Do not let a frontend setting suppress a concrete server-side or cryptographic risk present in the changed code.
 5. Keep related-code inspection narrow. Start with changed lines and their immediate context. Open another file only when it is directly linked to a concrete question raised by a change, such as the matching controller, validator, authorization middleware, schema, or direct caller/callee. Use `scope.maxRelatedFiles` and `scope.maxRelationshipHops` as defaults, and exceed them only when necessary to resolve a specific security question. State why any additional file was needed. Do not search unrelated modules, perform repository-wide audits, or infer missing behavior as fact.
 6. Verify candidates against nearby mitigations and execution paths. Report only claims supported by the changed code and the limited related context. If relevant context is unavailable, say so and keep the concern in Suspicious rather than asserting exploitability.
 7. Report using exactly these sections, in this order:
