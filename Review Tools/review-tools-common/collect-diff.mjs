@@ -33,14 +33,13 @@ function parseDiff(diffText) {
 
   for (const line of diffText.split('\n')) {
     if (line.startsWith('--- ')) {
-      const path = line.slice(6);
-      oldFilePath = path === '/dev/null' ? undefined : path;
+      oldFilePath = parseDiffPath(line.slice(4));
       continue;
     }
 
     if (line.startsWith('+++ ')) {
-      const path = line.slice(6);
-      if (path !== '/dev/null') {
+      const path = parseDiffPath(line.slice(4));
+      if (path) {
         currentFile = { path, status: oldFilePath ? 'modified' : 'added', changes: [] };
         files.push(currentFile);
       } else if (oldFilePath) {
@@ -74,6 +73,12 @@ function parseDiff(diffText) {
   }
 
   return files;
+}
+
+function parseDiffPath(path) {
+  path = path.trimEnd();
+  if (path === '/dev/null') return undefined;
+  return path.replace(/^[ab]\//, '');
 }
 
 function collectUntracked() {

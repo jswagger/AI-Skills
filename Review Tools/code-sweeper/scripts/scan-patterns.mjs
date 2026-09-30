@@ -29,8 +29,60 @@ try {
 
 const candidates = [];
 const changedTests = [];
-const addedLines = [];
 const commentPattern = /^\s*(?:\/\/|\/\*+|\*|#)/;
+
+function addPythonFunctionCandidates(file) {
+  if (!file.path.endsWith('.py')) return;
+
+  let sourceLines;
+  try {
+    sourceLines = readFileSync(file.path, 'utf8').split(/\r?\n/);
+  } catch {
+    return;
+  }
+
+  const addedLines = new Set((file.changes ?? [])
+    .filter((change) => change.side === 'added')
+    .map((change) => change.line));
+
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const definition = sourceLines[index].match(/^(\s*)(?:async\s+)?def\s+[A-Za-z_]\w*\s*\(/);
+    if (!definition) continue;
+
+    const indentation = definition[1].length;
+    let endIndex = sourceLines.length;
+    for (let nextIndex = index + 1; nextIndex < sourceLines.length; nextIndex += 1) {
+      const line = sourceLines[nextIndex];
+      if (!line.trim() || line.trimStart().startsWith('#')) continue;
+      const lineIndentation = line.length - line.trimStart().length;
+      if (lineIndentation <= indentation) {
+        endIndex = nextIndex;
+        break;
+      }
+    }
+
+    const bodyLines = sourceLines.slice(index + 1, endIndex)
+      .filter((line) => line.trim() && !line.trimStart().startsWith('#'));
+    const changedFunction = [...addedLines].some((line) => line > index && line <= endIndex);
+    if (changedFunction && bodyLines.length > (thresholds.maxFunctionLines ?? 50)) {
+      candidates.push({
+        ruleId: 'SWEEP-106',
+        severity: 'dusty',
+        path: file.path,
+        line: index + 1,
+        description: `Python function has ${bodyLines.length} nonblank body lines; consider splitting focused responsibilities`,
+        evidence: sourceLines[index].trim().slice(0, 240),
+      });
+    }
+  }
+}
+
+function isRepeatedBoilerplate(text) {
+  return /^(?:import\b|from\s+\S+\s+import\b)/.test(text)
+    || /^except\s+(?:Exception|BaseException)\b/.test(text)
+    || /^if\s+__name__\s*==\s*["']__main__["']\s*:/.test(text)
+    || /^(?:[\w$]+\.)?(?:sut|subject_under_test)\s*=/i.test(text);
+}
 
 for (const file of report.files) {
   if (isExcluded(file.path)) continue;
@@ -39,12 +91,11 @@ for (const file of report.files) {
   if (testFile && added.length > 0) {
     changedTests.push({ path: file.path, addedLines: added.length });
   }
+  addPythonFunctionCandidates(file);
 
   for (const change of added) {
     const text = change.text.trim();
     if (!text) continue;
-
-    addedLines.push({ path: file.path, line: change.line, text });
 
     if (change.text.length > (thresholds.maxLineLength ?? 120)) {
       candidates.push({
@@ -57,7 +108,9 @@ for (const file of report.files) {
       });
     }
 
-    if ((text.match(/\?/g) ?? []).length >= 2 && /\?[^:]+:[^;]+\?/.test(text)) {
+    const nestedConditional = ((text.match(/\?/g) ?? []).length >= 2 && /\?[^:]+:[^;]+\?/.test(text))
+      || (/\bif\b.*\belse\b.*\bif\b/.test(text) && file.path.endsWith('.py'));
+    if (nestedConditional) {
       candidates.push({
         ruleId: 'SWEEP-102',
         severity: 'dusty',
@@ -68,8 +121,10 @@ for (const file of report.files) {
       });
     }
 
-    const booleanOperators = (text.match(/&&|\|\|/g) ?? []).length;
-    if (booleanOperators > (thresholds.maxBooleanOperators ?? 3)) {
+    const booleanOperators = commentPattern.test(change.text)
+      ? []
+      : text.match(/&&|\|\||\b(?:and|or)\b/g) ?? [];
+    if (booleanOperators.length > (thresholds.maxBooleanOperators ?? 3)) {
       candidates.push({
         ruleId: 'SWEEP-103',
         severity: 'dusty',
@@ -93,26 +148,30 @@ for (const file of report.files) {
   }
 }
 
-const occurrences = new Map();
-for (const line of addedLines) {
-  if (line.text.length < 12 || commentPattern.test(line.text)) continue;
-  const normalized = line.text.replace(/\s+/g, ' ').trim();
-  const locations = occurrences.get(normalized) ?? [];
-  locations.push({ path: line.path, line: line.line });
-  occurrences.set(normalized, locations);
-}
+for (const file of report.files) {
+  if (isExcluded(file.path)) continue;
+  const occurrences = new Map();
+  for (const change of file.changes ?? []) {
+    if (change.side !== 'added') continue;
+    const text = change.text.replace(/\s+/g, ' ').trim();
+    if (text.length < 12 || commentPattern.test(change.text) || isRepeatedBoilerplate(text)) continue;
+    const locations = occurrences.get(text) ?? [];
+    locations.push(change.line);
+    occurrences.set(text, locations);
+  }
 
-for (const [text, locations] of occurrences) {
-  if (locations.length < 2) continue;
-  for (const location of locations) {
-    candidates.push({
-      ruleId: 'SWEEP-105',
-      severity: 'dusty',
-      path: location.path,
-      line: location.line,
-      description: `Same added statement appears ${locations.length} times in the change; check whether the logic should be shared`,
-      evidence: text.slice(0, 240),
-    });
+  for (const [text, locations] of occurrences) {
+    if (locations.length < 2) continue;
+    for (const line of locations) {
+      candidates.push({
+        ruleId: 'SWEEP-105',
+        severity: 'dusty',
+        path: file.path,
+        line,
+        description: `Same added statement appears ${locations.length} times in this file; check whether the logic should be shared`,
+        evidence: text.slice(0, 240),
+      });
+    }
   }
 }
 

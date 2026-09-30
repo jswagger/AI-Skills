@@ -13,11 +13,12 @@ Review additions and revisions for adherence to clean coding practices. Use the 
 Read [config.json](./config.json) before starting. `autoFix.enabled` defaults to `true` for clear, low-risk Unclean findings. Do not auto-fix Dusty findings. `tests.removeLowValue` defaults to `false`; when disabled, report test-removal suggestions only. When enabled, remove a test only when its lack of long-term value is clear from the test and directly related behavior. Never delete a test based only on a scanner match.
 
 `scan.exclude` patterns are omitted during collection and scanning. `scan.testFiles.patterns` identifies test paths for a dedicated test-value review. `scan.thresholds` provides review heuristics, not hard style requirements.
+The defaults exclude common prose and data files, including `.txt`, `.json`, database, CSV/TSV, XML, YAML, and TOML files. Remove or adjust these patterns when those files are part of the review.
 
 ## Procedure
 
 1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](../review-tools-common/collect-diff.mjs), passing this skill's config path. For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
-2. Run [scan-patterns.mjs](./scripts/scan-patterns.mjs) on the collector's JSON output. Treat its output as candidate locations, not verdicts. The scripts use Node.js built-ins and do not need third-party dependencies.
+2. Run [scan-patterns.mjs](./scripts/scan-patterns.mjs) on the collector's JSON output. Treat its output as candidate locations, not verdicts. Its Python heuristics include boolean operators and changed-function length; function length is approximate and based on nonblank, non-comment lines. The scripts use Node.js built-ins and do not need third-party dependencies.
 3. Review changed code and directly relevant nearby code for:
    - **Single Responsibility:** functions, methods, and modules that combine unrelated work or make changes difficult to isolate.
    - **Function size:** functions that are hard to understand or test as one unit. Use `scan.thresholds.maxFunctionLines` as a prompt to inspect, not an automatic failure.
