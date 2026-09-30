@@ -6,7 +6,7 @@ argument-hint: 'Optional base ref, such as origin/main'
 
 # Security Auditor
 
-Review additions and revisions for security vulnerabilities and risky patterns. Use the bundled scripts to collect diff evidence and flag repeatable patterns; verify every candidate in context before reporting it. This is a focused code review, not a guarantee that the code is secure.
+Review additions and revisions for security vulnerabilities and risky patterns. Use the shared review-tool helper to collect diff evidence and the bundled scanner to flag repeatable patterns; verify every candidate in context before reporting it. This is a focused code review, not a guarantee that the code is secure.
 
 ## Configuration
 
@@ -16,7 +16,7 @@ Read [config.json](./config.json) before starting. `models.basic` and `models.ad
 
 ## Procedure
 
-1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](./scripts/collect-diff.mjs). For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
+1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](../review-tools-common/collect-diff.mjs), passing this skill's config path. For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
 2. Run [scan-patterns.mjs](./scripts/scan-patterns.mjs) on the collector's JSON output. Treat its output as candidate locations, not confirmed findings. Review removed lines too, especially when a change deletes or weakens an existing security control; the pattern scanner only checks added lines. The scripts use Node.js built-ins and do not need third-party dependencies.
 3. Use the basic model role for common implementation risks. Review the changed code for:
    - **CRIT-101:** dynamic string construction in database queries, OS commands, or HTML rendering; prefer parameterized queries and safe APIs.
@@ -55,8 +55,7 @@ For each finding, include the rule ID when applicable, file and line, concise ev
 Run from the repository root:
 
 ```sh
-node "Review Tools/security-auditor/scripts/collect-diff.mjs" [base-ref] \
-  | node "Review Tools/security-auditor/scripts/scan-patterns.mjs"
+node "Review Tools/review-tools-common/collect-diff.mjs" --config "Review Tools/security-auditor/config.json" [base-ref] | node "Review Tools/security-auditor/scripts/scan-patterns.mjs"
 ```
 
-The collector defaults to `HEAD`; pass a target ref such as `origin/main` for a PR review. It includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints JSON candidates to standard output. It reports locations and rule IDs, not verdicts.
+The collector defaults to `diff.baseRef` in the supplied config, or `HEAD` when unset; pass a target ref such as `origin/main` for a PR review. It includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints JSON candidates to standard output. It reports locations and rule IDs, not verdicts.

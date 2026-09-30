@@ -6,7 +6,7 @@ argument-hint: 'Optional base ref, such as origin/main'
 
 # Code Sweeper
 
-Review additions and revisions for adherence to clean coding practices. Use the bundled scripts to collect diff evidence and flag repeatable patterns, then verify each candidate in context. This is a focused review of the change, not a repository-wide style audit.
+Review additions and revisions for adherence to clean coding practices. Use the shared review-tool helper to collect diff evidence and the bundled scanner to flag repeatable patterns, then verify each candidate in context. This is a focused review of the change, not a repository-wide style audit.
 
 ## Configuration
 
@@ -16,7 +16,7 @@ Read [config.json](./config.json) before starting. `autoFix.enabled` defaults to
 
 ## Procedure
 
-1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](./scripts/collect-diff.mjs). For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
+1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](../review-tools-common/collect-diff.mjs), passing this skill's config path. For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
 2. Run [scan-patterns.mjs](./scripts/scan-patterns.mjs) on the collector's JSON output. Treat its output as candidate locations, not verdicts. The scripts use Node.js built-ins and do not need third-party dependencies.
 3. Review changed code and directly relevant nearby code for:
    - **Single Responsibility:** functions, methods, and modules that combine unrelated work or make changes difficult to isolate.
@@ -45,8 +45,7 @@ For each item, include the rule ID when applicable, file and line, concise evide
 Run from the repository root:
 
 ```sh
-node "Review Tools/code-sweeper/scripts/collect-diff.mjs" [base-ref] \
-   | node "Review Tools/code-sweeper/scripts/scan-patterns.mjs"
+node "Review Tools/review-tools-common/collect-diff.mjs" --config "Review Tools/code-sweeper/config.json" [base-ref] | node "Review Tools/code-sweeper/scripts/scan-patterns.mjs"
 ```
 
-The collector defaults to `HEAD`; pass a target ref such as `origin/main` for a PR review. It includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints heuristic candidates and changed test files to standard output; it does not apply fixes or classify test value by itself.
+The collector defaults to `diff.baseRef` in the supplied config, or `HEAD` when unset; pass a target ref such as `origin/main` for a PR review. It includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints heuristic candidates and changed test files to standard output; it does not apply fixes or classify test value by itself.

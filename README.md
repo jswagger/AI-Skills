@@ -5,6 +5,11 @@ A collection of generic skills to be utilized by agents in common development wo
 
 - [Security Auditor](Review%20Tools/security-auditor/SKILL.md): review code changes for security vulnerabilities and risky patterns.
 - [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md): review code changes for clean-code issues and low-value tests.
+
+### Shared Helper Setup
+
+Both review skills use [review-tools-common](Review%20Tools/review-tools-common/) for diff collection and file filtering. Copy the complete folder into the target project's `.github/skills/review-tools-common/` directory (or `.agents/skills/review-tools-common/`) alongside whichever review skill folders you install.
+
 ### Code Sweeper Setup
 
 To make the skill discoverable in a project, copy the complete `code-sweeper` folder into that project's `.github/skills/code-sweeper/` directory. The `.agents/skills/code-sweeper/` directory is also supported. Keep `SKILL.md`, `config.json`, and `scripts/` together so the skill can find its configuration and scripts.
@@ -20,8 +25,7 @@ In VS Code Chat, run `/code-sweeper` to review changes against the configured ba
 From the target repository root, collect and scan changes with Node.js:
 
 ```sh
-node ".github/skills/code-sweeper/scripts/collect-diff.mjs" origin/main \\
-	| node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
+node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/code-sweeper/config.json" origin/main | node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
 ```
 
 Use `HEAD` or omit the argument to use the configured default. The collector includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files larger than `diff.untrackedMaxBytes` are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value.
@@ -60,8 +64,7 @@ In VS Code Chat, run `/security-auditor` to review changes against the configure
 From the target repository root, collect and scan changes with Node.js:
 
 ```sh
-node ".github/skills/security-auditor/scripts/collect-diff.mjs" origin/main \
-	| node ".github/skills/security-auditor/scripts/scan-patterns.mjs"
+node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/security-auditor/config.json" origin/main | node ".github/skills/security-auditor/scripts/scan-patterns.mjs"
 ```
 
 Use `HEAD` or omit the argument to use the configured default. The collector includes tracked changes relative to the base and untracked, non-ignored text files. It skips binary files and untracked files larger than `diff.untrackedMaxBytes`. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.

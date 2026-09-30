@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
-import { createFileFilters } from './file-filters.mjs';
+import { createFileFilters } from '../../review-tools-common/file-filters.mjs';
 
 const configPath = new URL('../config.json', import.meta.url);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));

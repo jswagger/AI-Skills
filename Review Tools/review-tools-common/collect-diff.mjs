@@ -2,14 +2,18 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { createFileFilters } from './file-filters.mjs';
 
-const configPath = new URL('../config.json', import.meta.url);
-const config = JSON.parse(readFileSync(configPath, 'utf8'));
-const { isExcluded } = createFileFilters(config.scan);
 const args = process.argv.slice(2);
-const baseRef = args[0] ?? config.diff.baseRef ?? 'HEAD';
+if (args[0] !== '--config' || !args[1] || args.length > 3) {
+  process.stderr.write('Usage: collect-diff.mjs --config <config-path> [base-ref]\n');
+  process.exit(1);
+}
+
+const config = JSON.parse(readFileSync(resolve(args[1]), 'utf8'));
+const { isExcluded } = createFileFilters(config.scan);
+const baseRef = args[2] ?? config.diff.baseRef ?? 'HEAD';
 const maxUntrackedBytes = config.diff.untrackedMaxBytes ?? 100000;
 
 function runGit(gitArgs, options = {}) {
