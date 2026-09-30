@@ -45,3 +45,41 @@ test('collector parses added, modified, and deleted Git paths', (context) => {
   assert.deepEqual(files.get('added.py').changes.map((change) => change.side), ['added']);
   assert.deepEqual(files.get('delete.py').changes.map((change) => change.side), ['removed']);
 });
+
+test('target refs compare from the merge base and retain working-tree changes', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'collect-merge-base-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  git(directory, ['init', '-q']);
+  git(directory, ['config', 'user.name', 'Code Review Tests']);
+  git(directory, ['config', 'user.email', 'code-review-tests@example.invalid']);
+  writeFileSync(join(directory, 'base.py'), 'base_value = 1\n');
+  git(directory, ['add', 'base.py']);
+  git(directory, ['commit', '-qm', 'baseline']);
+  const mergeBase = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).trim();
+
+  git(directory, ['branch', 'target']);
+  git(directory, ['checkout', '-q', 'target']);
+  writeFileSync(join(directory, 'target_only.py'), 'target_value = 1\n');
+  git(directory, ['add', 'target_only.py']);
+  git(directory, ['commit', '-qm', 'target change']);
+
+  git(directory, ['checkout', '-q', '-b', 'feature', mergeBase]);
+  writeFileSync(join(directory, 'feature.py'), 'feature_value = 1\n');
+  git(directory, ['add', 'feature.py']);
+  git(directory, ['commit', '-qm', 'feature change']);
+  writeFileSync(join(directory, 'working.py'), 'working_value = 1\n');
+
+  const result = spawnSync(process.execPath, [collectorPath, '--config', configPath, 'target'], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const report = JSON.parse(result.stdout);
+  const files = new Map(report.files.map((file) => [file.path, file]));
+  assert.equal(report.comparisonBase, mergeBase);
+  assert.equal(files.get('feature.py')?.status, 'added');
+  assert.equal(files.get('working.py')?.status, 'untracked');
+  assert.equal(files.has('target_only.py'), false);
+});

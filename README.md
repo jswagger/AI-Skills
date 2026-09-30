@@ -8,7 +8,7 @@ A collection of generic skills to be utilized by agents in common development wo
 
 ### Run Unit Tests
 
-Run the built-in Node.js test suites from the repository root with `node --test`. They cover scanner heuristics and shared diff collection; no third-party test dependencies are required.
+Run the built-in Node.js test suites from the repository root with `node --test "Review Tools/code-sweeper/test/scan-patterns.test.mjs" "Review Tools/security-auditor/test/scan-patterns.test.mjs" "Review Tools/review-tools-common/test/collect-diff.test.mjs"`. This explicit file list works on Node 22 and avoids passing a test directory as a module. No third-party test dependencies are required.
 
 ### Shared Helper Setup
 
@@ -32,7 +32,7 @@ From the target repository root, collect and scan changes with Node.js:
 node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/code-sweeper/config.json" origin/main | node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
 ```
 
-Use `HEAD` or omit the argument to use the configured default. The collector includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files larger than `diff.untrackedMaxBytes` are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value.
+Use `HEAD` or omit the argument to compare working-tree changes to `HEAD`. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value.
 
 ### Security Auditor Setup
 
@@ -71,4 +71,4 @@ From the target repository root, collect and scan changes with Node.js:
 node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/security-auditor/config.json" origin/main | node ".github/skills/security-auditor/scripts/scan-patterns.mjs"
 ```
 
-Use `HEAD` or omit the argument to use the configured default. The collector includes tracked changes relative to the base and untracked, non-ignored text files. It skips binary files and untracked files larger than `diff.untrackedMaxBytes`. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.
+Use `HEAD` or omit the argument to compare working-tree changes to `HEAD`. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.

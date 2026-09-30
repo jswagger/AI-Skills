@@ -105,3 +105,38 @@ test('infrastructure rules flag public ingress and risky workload settings', () 
   }
   assert.equal(report.coverage.infrastructure.changedFiles, 1);
 });
+
+test('SQL f-strings produce one contextual low-confidence candidate per changed string', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'security-sql-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const path = join(directory, 'sql.py');
+  const lines = [
+    'query = f"""SELECT * FROM users',
+    'WHERE id IN ({placeholders})',
+    '"""',
+    'constant_query = f"SELECT * FROM users {CONSTANT_FILTER}"',
+  ];
+  writeFileSync(path, lines.join('\n'));
+  const report = scan([{
+    path,
+    changes: lines.map((text, index) => ({ side: 'added', line: index + 1, text })),
+  }]);
+  const candidates = report.candidates.filter((candidate) => candidate.ruleId === 'CRIT-101');
+
+  assert.equal(candidates.length, 2);
+  assert.deepEqual(candidates.map((candidate) => candidate.line), [1, 4]);
+  assert(candidates.every((candidate) => candidate.confidence === 'lower'));
+  assert(candidates.every((candidate) => /placeholders|fixed SQL structure/.test(candidate.description)));
+});
+
+test('testdata fixtures are excluded without hiding source JSON policies', () => {
+  const report = scan([
+    { path: 'testdata/nested/description.txt', changes: [{ side: 'added', line: 1, text: 'verify=False' }] },
+    { path: 'testdata/payload.json', changes: [{ side: 'added', line: 1, text: 'verify=False' }] },
+    { path: 'policies/access.json', changes: [{ side: 'added', line: 1, text: 'Action = "*"' }] },
+  ]);
+
+  assert.equal(report.candidates.some((candidate) => candidate.path.startsWith('testdata/')), false);
+  assert(report.candidates.some((candidate) => candidate.path === 'policies/access.json'));
+});

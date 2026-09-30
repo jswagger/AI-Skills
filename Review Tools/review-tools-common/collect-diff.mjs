@@ -112,16 +112,22 @@ function collectUntracked() {
 }
 
 try {
-  const diffText = runGit(['diff', '--no-ext-diff', '--unified=0', baseRef, '--']);
+  const comparisonBase = baseRef === 'HEAD'
+    ? 'HEAD'
+    : runGit(['merge-base', baseRef, 'HEAD']).trim();
+  const diffText = runGit(['diff', '--no-ext-diff', '--unified=0', comparisonBase, '--']);
   const files = parseDiff(diffText).filter((file) => !isExcluded(file.path));
   const untracked = collectUntracked();
   const trackedPaths = new Set(files.map((file) => file.path));
 
   process.stdout.write(`${JSON.stringify({
     baseRef,
+    comparisonBase,
     files: [...files, ...untracked.files.filter((file) => !trackedPaths.has(file.path))],
     skipped: untracked.skipped,
-    note: 'Diff collection is limited to changes relative to the base ref and untracked non-ignored text files.',
+    note: baseRef === 'HEAD'
+      ? 'Diff collection is limited to working-tree changes relative to HEAD and untracked non-ignored text files.'
+      : 'Diff collection starts at the merge base of the target ref and HEAD, includes working-tree changes, and includes untracked non-ignored text files.',
   }, null, 2)}\n`);
 } catch (error) {
   const message = error.stderr?.toString('utf8').trim() || error.message;

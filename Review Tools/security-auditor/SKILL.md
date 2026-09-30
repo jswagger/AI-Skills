@@ -16,10 +16,10 @@ Read [config.json](./config.json) before starting. `models.basic` and `models.ad
 
 ## Procedure
 
-1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](../review-tools-common/collect-diff.mjs), passing this skill's config path. For a pull request, prefer its target branch or merge base. Include untracked, non-ignored files.
+1. Determine the comparison base. Use the provided argument when present; otherwise use `diff.baseRef` from the config. Collect the change set with [collect-diff.mjs](../review-tools-common/collect-diff.mjs), passing this skill's config path. For any base other than `HEAD`, the collector resolves `git merge-base <base> HEAD` before diffing, while retaining working-tree and untracked changes. Include untracked, non-ignored files.
 2. Run [scan-patterns.mjs](./scripts/scan-patterns.mjs) on the collector's JSON output. Treat its output as candidate locations, not confirmed findings. Keep both JSON outputs as the shared review input; delegated passes must use them rather than collecting again. The scanner checks added lines and emits `REG-401` candidates for removed lines containing security-control terms. The scripts use Node.js built-ins and do not need third-party dependencies.
 3. Use the basic model role for common implementation risks. Review the changed code for:
-   - **CRIT-101:** dynamic string construction in database queries, OS commands, or HTML rendering, including Python SQL f-strings; prefer parameterized queries and safe APIs.
+   - **CRIT-101:** dynamic string construction in database queries, OS commands, or HTML rendering, including Python SQL f-strings; prefer parameterized queries and safe APIs. Treat f-string candidates as contextual, lower-confidence leads: placeholders and fixed SQL fragments may be safe when values are passed separately to the driver.
    - **CRIT-102:** blacklist-based input validation; prefer explicit allowlists, exact types, or enums.
    - **CRIT-103:** validation added only on the client; check the directly corresponding API/controller for server-side enforcement.
    - **CRIT-201:** hard-coded credentials or secrets, including quoted dictionary keys, fallback literals, and credentials embedded in connection URLs. Recommend environment configuration or a secrets manager. Never reproduce a secret value in the report; scanner evidence is redacted.
@@ -71,4 +71,4 @@ Run from the repository root:
 node "Review Tools/review-tools-common/collect-diff.mjs" --config "Review Tools/security-auditor/config.json" [base-ref] | node "Review Tools/security-auditor/scripts/scan-patterns.mjs"
 ```
 
-The collector defaults to `diff.baseRef` in the supplied config, or `HEAD` when unset; pass a target ref such as `origin/main` for a PR review. It includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints JSON candidates to standard output. It reports locations and rule IDs, not verdicts.
+The collector defaults to `diff.baseRef` in the supplied config, or `HEAD` when unset. With `HEAD`, it compares the working tree to `HEAD`; with another ref, it compares the working tree to `git merge-base <ref> HEAD`, excluding target-only commits while retaining feature-branch and local changes. It also includes untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints JSON candidates to standard output. It reports locations and rule IDs, not verdicts.

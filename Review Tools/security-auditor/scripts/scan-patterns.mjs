@@ -146,11 +146,11 @@ function readSourceLines(file) {
 }
 
 function findPythonSqlFstringLines(file, sourceLines) {
-  if (!sourceLines || !file.path.endsWith('.py')) return new Set();
+  if (!sourceLines || !file.path.endsWith('.py')) return [];
 
   const source = sourceLines.join('\n');
   const stringPattern = /(?:^|[^\w])(?:fr|rf|f)("""|'''|"|')([\s\S]*?)\1/gim;
-  const changedLines = new Set();
+  const strings = [];
   for (const match of source.matchAll(stringPattern)) {
     const body = match[2];
     if (!/\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE|ORDER\s+BY)\b/i.test(body) || !/\{[^{}]+\}/.test(body)) {
@@ -160,13 +160,12 @@ function findPythonSqlFstringLines(file, sourceLines) {
     const bodyStart = match.index + match[0].indexOf(body);
     const firstLine = source.slice(0, bodyStart).split('\n').length;
     const lastLine = firstLine + body.split('\n').length - 1;
-    for (const change of file.changes ?? []) {
-      if (change.side === 'added' && change.line >= firstLine && change.line <= lastLine) {
-        changedLines.add(change.line);
-      }
-    }
+    const changedLines = (file.changes ?? [])
+      .filter((change) => change.side === 'added' && change.line >= firstLine && change.line <= lastLine)
+      .map((change) => change.line);
+    if (changedLines.length > 0) strings.push({ line: changedLines[0], firstLine, lastLine });
   }
-  return changedLines;
+  return strings;
 }
 
 function isSwallowedPythonException(file, change, sourceLines) {
@@ -207,7 +206,11 @@ for (const file of report.files) {
   if (testFile && config.scan?.testFiles?.mode === 'skip') continue;
   scannedFiles.push(file);
   const sourceLines = file.path.endsWith('.py') ? readSourceLines(file) : undefined;
-  const pythonSqlFstringLines = findPythonSqlFstringLines(file, sourceLines);
+  const pythonSqlFstrings = findPythonSqlFstringLines(file, sourceLines);
+  const pythonSqlFstringLines = new Set(pythonSqlFstrings.flatMap((string) =>
+    (file.changes ?? [])
+      .filter((change) => change.side === 'added' && change.line >= string.firstLine && change.line <= string.lastLine)
+      .map((change) => change.line)));
 
   for (const change of file.changes ?? []) {
     if (change.side === 'removed') {
@@ -229,6 +232,7 @@ for (const file of report.files) {
     if (change.side !== 'added') continue;
 
     for (const rule of rules) {
+      if (rule.id === 'CRIT-101' && pythonSqlFstringLines.has(change.line)) continue;
       if (rule.id === 'CRIT-106' && isSafeYamlLoad(file, change, sourceLines)) continue;
       if (!rule.pattern.test(change.text)) continue;
       addCandidate({
@@ -249,19 +253,6 @@ for (const file of report.files) {
       });
     }
 
-    if (pythonSqlFstringLines.has(change.line)) {
-      addCandidate({
-        ruleId: 'CRIT-101',
-        path: file.path,
-        line: change.line,
-        description: 'Dynamic value interpolated into a Python SQL f-string; use query parameters',
-        evidence: change.text.trim().slice(0, 240),
-        ...(testFile && config.scan?.testFiles?.mode === 'lower-confidence'
-          ? { confidence: 'lower' }
-          : {}),
-      });
-    }
-
     if (isSwallowedPythonException(file, change, sourceLines)) {
       addCandidate({
         ruleId: 'CRIT-301',
@@ -272,6 +263,18 @@ for (const file of report.files) {
         ...(testFile && config.scan?.testFiles?.mode === 'lower-confidence'
           ? { confidence: 'lower' }
           : {}),
+      });
+    }
+
+    for (const string of pythonSqlFstrings) {
+      const stringEvidence = sourceLines.slice(string.firstLine - 1, string.lastLine).join('\n');
+      addCandidate({
+        ruleId: 'CRIT-101',
+        path: file.path,
+        line: string.line,
+        description: 'Potential SQL f-string construction; inspect whether interpolations are fixed SQL structure or placeholders, and confirm values are separately bound',
+        evidence: stringEvidence.trim().slice(0, 240),
+        confidence: 'lower',
       });
     }
   }
