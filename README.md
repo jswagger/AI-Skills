@@ -4,6 +4,27 @@ A collection of generic skills to be utilized by agents in common development wo
 ## Review Tools
 
 - [Security Auditor](Review%20Tools/security-auditor/SKILL.md): review code changes for security vulnerabilities and risky patterns.
+- [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md): review code changes for clean-code issues and low-value tests.
+### Code Sweeper Setup
+
+To make the skill discoverable in a project, copy the complete `code-sweeper` folder into that project's `.github/skills/code-sweeper/` directory. The `.agents/skills/code-sweeper/` directory is also supported. Keep `SKILL.md`, `config.json`, and `scripts/` together so the skill can find its configuration and scripts.
+
+Edit `config.json` to tune review defaults. Obvious cleanup auto-fixes are enabled by default; test removal is disabled by default and can be enabled separately after contextual review.
+
+### Use the Skill
+
+In VS Code Chat, run `/code-sweeper` to review changes against the configured base, or pass a target branch such as `/code-sweeper origin/main` for a pull request. The skill collects the diff, reports heuristic clean-code candidates, then reviews the evidence and reports Unclean, Dusty, and Clean sections. Treat automated matches as candidates, not confirmed issues.
+
+### Run the Scripts Directly
+
+From the target repository root, collect and scan changes with Node.js:
+
+```sh
+node ".github/skills/code-sweeper/scripts/collect-diff.mjs" origin/main \\
+	| node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
+```
+
+Use `HEAD` or omit the argument to use the configured default. The collector includes tracked changes relative to that ref and untracked, non-ignored text files. Binary files and untracked files larger than `diff.untrackedMaxBytes` are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value.
 
 ### Security Auditor Setup
 
