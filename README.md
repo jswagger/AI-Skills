@@ -6,6 +6,10 @@ A collection of generic skills to be utilized by agents in common development wo
 - [Security Auditor](Review%20Tools/security-auditor/SKILL.md): review code changes for security vulnerabilities and risky patterns.
 - [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md): review code changes for clean-code issues and low-value tests.
 
+### Run Unit Tests
+
+Run the built-in Node.js test suites from the repository root with `node --test`. They cover scanner heuristics and shared diff collection; no third-party test dependencies are required.
+
 ### Shared Helper Setup
 
 Both review skills use [review-tools-common](Review%20Tools/review-tools-common/) for diff collection and file filtering. Copy the complete folder into the target project's `.github/skills/review-tools-common/` directory (or `.agents/skills/review-tools-common/`) alongside whichever review skill folders you install.
@@ -39,8 +43,8 @@ Edit `config.json` to choose the model roles and review defaults:
 ```json
 {
 	"models": {
-		"basic": "Haiku",
-		"advanced": "Sonnet"
+		"basic": "haiku",
+		"advanced": "sonnet"
 	},
 	"diff": {
 		"baseRef": "HEAD",
@@ -53,7 +57,7 @@ Edit `config.json` to choose the model roles and review defaults:
 }
 ```
 
-Set `models.basic` and `models.advanced` to the model names available in your agent environment. The defaults are Haiku for common-pattern review and Sonnet for architectural review; actual model switching depends on the agent environment. `diff.baseRef` is used when no base is supplied, and the scope values guide how far the review follows related code.
+Set `models.basic` and `models.advanced` to the model selectors available in your agent environment. Defaults are `haiku` for common-pattern review and `sonnet` for architectural review; subagents should receive the collected diff and scanner candidates without recollecting. Set `scan.projectStack` for the target repository (`backend`, `frontend`, `full-stack`, or `unknown`); the shipped default is `backend`. `diff.baseRef` is used when no base is supplied, and the scope values guide how far the review follows related code.
 
 ### Use the Skill
 
