@@ -130,6 +130,43 @@ test('SQL f-strings produce one contextual low-confidence candidate per changed 
   assert(candidates.every((candidate) => /placeholders|fixed SQL structure/.test(candidate.description)));
 });
 
+test('C# changes use C# rules and do not flag LINQ Select projections as SQL', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'security-csharp-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const path = join(directory, 'Controller.cs');
+  const lines = [
+    'var items = values.Select(value => new { value.Id });',
+    'var command = new SqlCommand($"SELECT * FROM users WHERE id = {userId}", connection);',
+    'var rows = connection.Query("SELECT * FROM users WHERE id = " + userId);',
+    'var formatter = new BinaryFormatter();',
+    'settings.TypeNameHandling = TypeNameHandling.All;',
+    '[AllowAnonymous]',
+    'ServicePointManager.ServerCertificateValidationCallback += (_, _, _, _) => true;',
+    'Process.Start(fileName, arguments);',
+    'var unsafeYaml = yaml.load(input);',
+    'subprocess.run(command, shell=True);',
+  ];
+  writeFileSync(path, lines.join('\n'));
+  const report = scan([{
+    path,
+    changes: lines.map((text, index) => ({ side: 'added', line: index + 1, text })),
+  }]);
+  const candidates = report.candidates;
+  const ruleIds = new Set(candidates.map((candidate) => candidate.ruleId));
+
+  assert.equal(report.coverage.csharp.changedFiles, 1);
+  assert.deepEqual(report.coverage.detectedLanguages, ['csharp']);
+  assert.equal(candidates.some((candidate) => candidate.ruleId === 'CRIT-101' && candidate.line === 1), false);
+  assert.deepEqual(candidates.filter((candidate) => candidate.ruleId === 'CRIT-101').map((candidate) => candidate.line), [2, 3]);
+  for (const ruleId of ['CRIT-101', 'CRIT-108', 'CRIT-109', 'CRIT-110', 'CRIT-111', 'CRIT-112']) {
+    assert(ruleIds.has(ruleId), `${ruleId} should match the C# fixture`);
+  }
+  for (const ruleId of ['CRIT-104', 'CRIT-106', 'CRIT-107']) {
+    assert.equal(ruleIds.has(ruleId), false, `${ruleId} should not run on C# files`);
+  }
+});
+
 test('testdata fixtures are excluded without hiding source JSON policies', () => {
   const report = scan([
     { path: 'testdata/nested/description.txt', changes: [{ side: 'added', line: 1, text: 'verify=False' }] },

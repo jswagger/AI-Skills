@@ -83,3 +83,40 @@ test('target refs compare from the merge base and retain working-tree changes', 
   assert.equal(files.get('working.py')?.status, 'untracked');
   assert.equal(files.has('target_only.py'), false);
 });
+
+test('configured origin/HEAD is used automatically and falls back to HEAD when absent', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'collect-auto-base-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  git(directory, ['init', '-q']);
+  git(directory, ['config', 'user.name', 'Code Review Tests']);
+  git(directory, ['config', 'user.email', 'code-review-tests@example.invalid']);
+  writeFileSync(join(directory, 'base.py'), 'value = 1\n');
+  git(directory, ['add', 'base.py']);
+  git(directory, ['commit', '-qm', 'baseline']);
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: directory, encoding: 'utf8' }).trim();
+
+  const fallbackResult = spawnSync(process.execPath, [collectorPath, '--config', configPath], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  assert.equal(fallbackResult.status, 0, fallbackResult.stderr);
+  const fallbackReport = JSON.parse(fallbackResult.stdout);
+  assert.equal(fallbackReport.requestedBaseRef, 'origin/HEAD');
+  assert.equal(fallbackReport.baseRef, 'HEAD');
+  assert.equal(fallbackReport.comparisonBase, 'HEAD');
+  assert.match(fallbackReport.note, /fell back/);
+
+  git(directory, ['update-ref', 'refs/remotes/origin/main', head]);
+  git(directory, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+  writeFileSync(join(directory, 'changed.py'), 'value = 2\n');
+  const detectedResult = spawnSync(process.execPath, [collectorPath, '--config', configPath], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  assert.equal(detectedResult.status, 0, detectedResult.stderr);
+  const detectedReport = JSON.parse(detectedResult.stdout);
+  assert.equal(detectedReport.requestedBaseRef, 'origin/HEAD');
+  assert.equal(detectedReport.baseRef, 'origin/HEAD');
+  assert.equal(detectedReport.comparisonBase, head);
+});

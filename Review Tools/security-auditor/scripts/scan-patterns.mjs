@@ -7,6 +7,14 @@ const configPath = new URL('../config.json', import.meta.url);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 const { isExcluded, isTestFile } = createFileFilters(config.scan);
 
+function languageForPath(path) {
+  if (/\.py$/i.test(path)) return 'python';
+  if (/\.cs$/i.test(path)) return 'csharp';
+  if (/\.tsx?$/i.test(path)) return 'typescript';
+  if (/\.jsx?$/i.test(path)) return 'javascript';
+  return undefined;
+}
+
 const input = await new Promise((resolve, reject) => {
   let data = '';
   process.stdin.setEncoding('utf8');
@@ -19,7 +27,7 @@ const rules = [
   {
     id: 'CRIT-101',
     description: 'Dynamic string construction near a query, command, or HTML sink',
-    pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE|ORDER\s+BY|EXEC(?:UTE)?)\b.*(?:\$\{|\+\s*[\w$]|\.format\s*\(|\{[^}]+\})|(?:exec|spawn|innerHTML|outerHTML)\s*\(.*(?:\$\{|\+\s*[\w$])/i,
+    pattern: /\b(?:SELECT(?!\s*\()|INSERT|UPDATE|DELETE|WHERE|ORDER\s+BY|EXEC(?:UTE)?)\b.*(?:\$\{|\+\s*[\w$]|\.format\s*\(|\{[^}]+\})|(?:exec|spawn|innerHTML|outerHTML)\s*\(.*(?:\$\{|\+\s*[\w$])/i,
   },
   {
     id: 'CRIT-102',
@@ -63,21 +71,55 @@ const rules = [
     id: 'CRIT-104',
     description: 'Possible shell command execution with shell enabled or os.system',
     pattern: /\b(?:subprocess\.(?:run|Popen|call|check_call|check_output)|Popen)\s*\([^\n)]*\bshell\s*=\s*True\b|\bos\.system\s*\(/i,
+    languages: ['python'],
   },
   {
     id: 'CRIT-105',
     description: 'Dynamic code evaluation with eval or exec',
     pattern: /\b(?:eval|exec)\s*\(/,
+    languages: ['python', 'javascript', 'typescript'],
   },
   {
     id: 'CRIT-106',
     description: 'Potentially unsafe pickle or YAML deserialization',
     pattern: /\bpickle\.(?:load|loads)\s*\(|\byaml\.load\s*\(/i,
+    languages: ['python'],
   },
   {
     id: 'CRIT-107',
     description: 'TLS certificate verification is disabled',
     pattern: /\bverify\s*=\s*False\b/i,
+    languages: ['python'],
+  },
+  {
+    id: 'CRIT-108',
+    description: 'Use of the unsafe BinaryFormatter deserializer',
+    pattern: /\bBinaryFormatter\b/,
+    languages: ['csharp'],
+  },
+  {
+    id: 'CRIT-109',
+    description: 'Newtonsoft.Json TypeNameHandling.All may enable unsafe polymorphic deserialization',
+    pattern: /\bTypeNameHandling\s*\.\s*All\b/,
+    languages: ['csharp'],
+  },
+  {
+    id: 'CRIT-110',
+    description: 'AllowAnonymous disables authorization on the annotated endpoint',
+    pattern: /\[\s*AllowAnonymous\s*\]/,
+    languages: ['csharp'],
+  },
+  {
+    id: 'CRIT-111',
+    description: 'Server certificate validation callback may bypass TLS certificate checks',
+    pattern: /\bServerCertificateValidationCallback\b/,
+    languages: ['csharp'],
+  },
+  {
+    id: 'CRIT-112',
+    description: 'Process.Start launches an operating-system process; verify arguments and trust boundaries',
+    pattern: /\bProcess\s*\.\s*Start\s*\(/,
+    languages: ['csharp'],
   },
   {
     id: 'ARCH-403',
@@ -168,6 +210,24 @@ function findPythonSqlFstringLines(file, sourceLines) {
   return strings;
 }
 
+function findCSharpSqlLines(file, sourceLines) {
+  if (!sourceLines || languageForPath(file.path) !== 'csharp') return [];
+
+  return (file.changes ?? [])
+    .filter((change) => change.side === 'added')
+    .filter((change) => {
+      const context = sourceLines.slice(Math.max(0, change.line - 5), change.line + 4).join('\n');
+      const line = sourceLines[change.line - 1] ?? change.text;
+      const hasQuerySink = /\b(?:SqlCommand|Query)\s*\(/i.test(context);
+      const hasSql = /\b(?:SELECT(?!\s*\()\s+(?:\*|\w)|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|DELETE\s+FROM\b|WHERE\s+\w+)\b/i.test(context);
+      const hasSqlOnLine = /\b(?:SELECT(?!\s*\()\s+(?:\*|\w)|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|DELETE\s+FROM\b|WHERE\s+\w+)\b/i.test(line);
+      const hasInterpolationOnLine = /(?:\$@?"|@\$")/.test(line);
+      const hasConcatenationOnLine = /(?:["'][^\n"']*["']\s*\+\s*\w+|\w+\s*\+\s*["'])/.test(line);
+      return hasQuerySink && hasSql && (hasSqlOnLine || hasInterpolationOnLine || hasConcatenationOnLine);
+    })
+    .map((change) => change.line);
+}
+
 function isSwallowedPythonException(file, change, sourceLines) {
   if (!file.path.endsWith('.py')) return false;
   const line = sourceLines?.[change.line - 1] ?? change.text;
@@ -205,8 +265,10 @@ for (const file of report.files) {
   const testFile = isTestFile(file.path);
   if (testFile && config.scan?.testFiles?.mode === 'skip') continue;
   scannedFiles.push(file);
-  const sourceLines = file.path.endsWith('.py') ? readSourceLines(file) : undefined;
+  const language = languageForPath(file.path);
+  const sourceLines = ['python', 'csharp'].includes(language) ? readSourceLines(file) : undefined;
   const pythonSqlFstrings = findPythonSqlFstringLines(file, sourceLines);
+  const csharpSqlLines = new Set(findCSharpSqlLines(file, sourceLines));
   const pythonSqlFstringLines = new Set(pythonSqlFstrings.flatMap((string) =>
     (file.changes ?? [])
       .filter((change) => change.side === 'added' && change.line >= string.firstLine && change.line <= string.lastLine)
@@ -232,6 +294,8 @@ for (const file of report.files) {
     if (change.side !== 'added') continue;
 
     for (const rule of rules) {
+      if (rule.languages && !rule.languages.includes(language)) continue;
+      if (rule.id === 'CRIT-101' && language === 'csharp') continue;
       if (rule.id === 'CRIT-101' && pythonSqlFstringLines.has(change.line)) continue;
       if (rule.id === 'CRIT-106' && isSafeYamlLoad(file, change, sourceLines)) continue;
       if (!rule.pattern.test(change.text)) continue;
@@ -250,6 +314,17 @@ for (const file of report.files) {
         ...(config.scan?.projectStack === 'frontend' && rule.stackSensitive
           ? { reviewPriority: 'lower' }
           : {}),
+      });
+    }
+
+    if (csharpSqlLines.has(change.line)) {
+      addCandidate({
+        ruleId: 'CRIT-101',
+        path: file.path,
+        line: change.line,
+        description: 'Possible dynamically constructed SQL near SqlCommand or Query; confirm values are passed as parameters',
+        evidence: change.text.trim().slice(0, 240),
+        confidence: 'lower',
       });
     }
 
@@ -281,6 +356,7 @@ for (const file of report.files) {
 }
 
 const pythonFiles = scannedFiles.filter((file) => file.path.endsWith('.py'));
+const csharpFiles = scannedFiles.filter((file) => languageForPath(file.path) === 'csharp');
 const infrastructureFiles = scannedFiles.filter((file) => infrastructurePathPattern.test(file.path));
 
 process.stdout.write(`${JSON.stringify({
@@ -293,6 +369,13 @@ process.stdout.write(`${JSON.stringify({
         ? 'Targeted Python heuristics ran; this is not exhaustive security analysis.'
         : 'No changed Python files were collected.',
     },
+    csharp: {
+      changedFiles: csharpFiles.length,
+      note: csharpFiles.length
+        ? 'Targeted C# heuristics ran; this is not exhaustive security analysis.'
+        : 'No changed C# files were collected.',
+    },
+    detectedLanguages: [...new Set(scannedFiles.map((file) => languageForPath(file.path)).filter(Boolean))],
     infrastructure: {
       changedFiles: infrastructureFiles.length,
       note: infrastructureFiles.length

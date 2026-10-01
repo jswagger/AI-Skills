@@ -4,7 +4,7 @@
     "advanced": "sonnet"
   },
   "diff": {
-    "baseRef": "HEAD",
+    "baseRef": "origin/HEAD",
     "untrackedMaxBytes": 100000
   },
   "scan": {
@@ -13,6 +13,9 @@
       "yarn.lock",
       "pnpm-lock.yaml",
       "**/testdata/**",
+      "**/bin/**",
+      "**/obj/**",
+      "*.Designer.cs",
       "*.md",
       "*.tsbuildinfo",
       "*.snap"

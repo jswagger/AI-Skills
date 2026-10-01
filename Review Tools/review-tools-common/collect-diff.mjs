@@ -13,7 +13,9 @@ if (args[0] !== '--config' || !args[1] || args.length > 3) {
 
 const config = JSON.parse(readFileSync(resolve(args[1]), 'utf8'));
 const { isExcluded } = createFileFilters(config.scan);
-const baseRef = args[2] ?? config.diff.baseRef ?? 'HEAD';
+const requestedBaseRef = args[2] ?? config.diff.baseRef ?? 'HEAD';
+let baseRef = requestedBaseRef;
+let usedFallbackBase = false;
 const maxUntrackedBytes = config.diff.untrackedMaxBytes ?? 100000;
 
 function runGit(gitArgs, options = {}) {
@@ -75,6 +77,15 @@ function parseDiff(diffText) {
   return files;
 }
 
+if (baseRef === 'origin/HEAD') {
+  try {
+    runGit(['rev-parse', '--verify', 'origin/HEAD']);
+  } catch {
+    baseRef = 'HEAD';
+    usedFallbackBase = true;
+  }
+}
+
 function parseDiffPath(path) {
   path = path.trimEnd();
   if (path === '/dev/null') return undefined;
@@ -122,10 +133,13 @@ try {
 
   process.stdout.write(`${JSON.stringify({
     baseRef,
+    requestedBaseRef,
     comparisonBase,
     files: [...files, ...untracked.files.filter((file) => !trackedPaths.has(file.path))],
     skipped: untracked.skipped,
-    note: baseRef === 'HEAD'
+    note: usedFallbackBase
+      ? 'origin/HEAD was unavailable, so diff collection fell back to the working-tree comparison against HEAD and untracked non-ignored text files.'
+      : baseRef === 'HEAD'
       ? 'Diff collection is limited to working-tree changes relative to HEAD and untracked non-ignored text files.'
       : 'Diff collection starts at the merge base of the target ref and HEAD, includes working-tree changes, and includes untracked non-ignored text files.',
   }, null, 2)}\n`);

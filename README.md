@@ -47,7 +47,7 @@ Edit `config.json` to choose the model roles and review defaults:
 		"advanced": "sonnet"
 	},
 	"diff": {
-		"baseRef": "HEAD",
+		"baseRef": "origin/HEAD",
 		"untrackedMaxBytes": 100000
 	},
 	"scope": {
@@ -57,7 +57,7 @@ Edit `config.json` to choose the model roles and review defaults:
 }
 ```
 
-Set `models.basic` and `models.advanced` to the model selectors available in your agent environment. Defaults are `haiku` for common-pattern review and `sonnet` for architectural review; subagents should receive the collected diff and scanner candidates without recollecting. Set `scan.projectStack` for the target repository (`backend`, `frontend`, `full-stack`, or `unknown`); the shipped default is `backend`. `diff.baseRef` is used when no base is supplied, and the scope values guide how far the review follows related code.
+Set `models.basic` and `models.advanced` to the model selectors available in your agent environment. Defaults are `haiku` for common-pattern review and `sonnet` for architectural review; subagents should receive the collected diff and scanner candidates without recollecting. Set `scan.projectStack` for the target repository (`backend`, `frontend`, `full-stack`, or `unknown`); the shipped default is `backend`. The scanner recognizes JavaScript/TypeScript, Python, and C# source files, detecting languages per changed file so language-specific heuristics only run on matching files. Coverage is heuristic and varies by language; it is not exhaustive. `diff.baseRef` is used when no base is supplied; the Security Auditor defaults to `origin/HEAD` and falls back to `HEAD` if unavailable. The scope values guide how far the review follows related code.
 
 ### Use the Skill
 
@@ -71,4 +71,4 @@ From the target repository root, collect and scan changes with Node.js:
 node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/security-auditor/config.json" origin/main | node ".github/skills/security-auditor/scripts/scan-patterns.mjs"
 ```
 
-Use `HEAD` or omit the argument to compare working-tree changes to `HEAD`. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.
+Pass a target ref such as `origin/main` to compare from `git merge-base <ref> HEAD`, excluding target-only commits while retaining feature-branch and local changes. With no argument, the Security Auditor uses `origin/HEAD`, falling back to `HEAD` when that ref is unavailable. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.
