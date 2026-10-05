@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const collectorPath = fileURLToPath(new URL('../collect-diff.mjs', import.meta.url));
 const configPath = fileURLToPath(new URL('../../security-auditor/config.json', import.meta.url));
+const codeSweeperConfigPath = fileURLToPath(new URL('../../code-sweeper/config.json', import.meta.url));
 
 function git(directory, args) {
   execFileSync('git', args, { cwd: directory, stdio: 'ignore' });
@@ -119,4 +120,39 @@ test('configured origin/HEAD is used automatically and falls back to HEAD when a
   assert.equal(detectedReport.requestedBaseRef, 'origin/HEAD');
   assert.equal(detectedReport.baseRef, 'origin/HEAD');
   assert.equal(detectedReport.comparisonBase, head);
+});
+
+test('collector skips JS/TS generated artifacts and untracked files with tracked siblings', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'collect-generated-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  git(directory, ['init', '-q']);
+  git(directory, ['config', 'user.name', 'Code Review Tests']);
+  git(directory, ['config', 'user.email', 'code-review-tests@example.invalid']);
+  mkdirSync(join(directory, 'src'), { recursive: true });
+  mkdirSync(join(directory, 'config'), { recursive: true });
+  writeFileSync(join(directory, 'src', 'module.ts'), 'export const value = 1;\n');
+  git(directory, ['add', 'src/module.ts']);
+  git(directory, ['commit', '-qm', 'baseline']);
+
+  writeFileSync(join(directory, 'src', 'module.js'), 'export const value = 1;\n');
+  writeFileSync(join(directory, 'src', 'notes.py'), 'value = 1\n');
+  writeFileSync(join(directory, 'src', 'module.d.ts'), 'export declare const value: number;\n');
+  writeFileSync(join(directory, 'config', 'generated.js'), 'module.exports = {};\n');
+  writeFileSync(join(directory, 'build.tsbuildinfo'), '{}\n');
+
+  const result = spawnSync(process.execPath, [collectorPath, '--config', codeSweeperConfigPath, 'HEAD'], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const report = JSON.parse(result.stdout);
+  const collectedPaths = report.files.map((file) => file.path);
+  assert(collectedPaths.includes('src/notes.py'));
+  assert.equal(collectedPaths.includes('src/module.js'), false);
+  assert.equal(collectedPaths.includes('src/module.d.ts'), false);
+  assert.equal(collectedPaths.includes('config/generated.js'), false);
+  assert.equal(collectedPaths.includes('build.tsbuildinfo'), false);
+  assert(report.skipped.some((file) => file.path === 'src/module.js' && /tracked.*sibling/.test(file.reason)));
 });

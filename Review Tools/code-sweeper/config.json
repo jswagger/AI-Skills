@@ -20,6 +20,8 @@
 			"*.yml",
 			"*.toml",
 			"*.tsbuildinfo",
+			"*.d.ts",
+			"config/**/*.js",
 			"*.snap"
 		],
 		"testFiles": {

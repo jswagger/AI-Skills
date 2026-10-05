@@ -30,6 +30,16 @@ try {
 const candidates = [];
 const changedTests = [];
 const commentPattern = /^\s*(?:\/\/|\/\*+|\*|#)/;
+const addedLineCount = report.files.reduce((count, file) => count
+  + (file.changes ?? []).filter((change) => change.side === 'added').length, 0);
+const fileCount = report.files.length;
+const sizeSummary = `${addedLineCount.toLocaleString()} added lines across `
+  + `${fileCount.toLocaleString()} ${fileCount === 1 ? 'file' : 'files'}`;
+const largeDiffNote = addedLineCount >= 10000 ? '; large diffs may yield thousands of candidates' : '';
+process.stderr.write(
+  `Code Sweeper: scanning ${sizeSummary}${largeDiffNote}. `
+    + 'Pass a base ref or adjust scan.exclude to scope the review.\n',
+);
 
 function addPythonFunctionCandidates(file) {
   if (!file.path.endsWith('.py')) return;
@@ -84,6 +94,12 @@ function isRepeatedBoilerplate(text) {
     || /^(?:[\w$]+\.)?(?:sut|subject_under_test)\s*=/i.test(text);
 }
 
+function isDuplicateNoise(text) {
+  return /^await\s+waitFor\b/.test(text)
+    || /^\}\);$/.test(text)
+    || /^(?:[$\w]+|'[^']+'|"[^"]+")\s*:\s*.+,$/.test(text);
+}
+
 for (const file of report.files) {
   if (isExcluded(file.path)) continue;
   const testFile = isTestFile(file.path);
@@ -92,6 +108,21 @@ for (const file of report.files) {
     changedTests.push({ path: file.path, addedLines: added.length });
   }
   addPythonFunctionCandidates(file);
+
+  if (/\.(?:[cm]?[jt]sx?)$/i.test(file.path)) {
+    for (const change of added) {
+      const text = change.text.trim();
+      if (commentPattern.test(change.text) || !/\bas\s+any\b|:\s*any\b/.test(text)) continue;
+      candidates.push({
+        ruleId: 'SWEEP-107',
+        severity: 'dusty',
+        path: file.path,
+        line: change.line,
+        description: 'Added JS/TS code uses any; prefer a specific type when practical',
+        evidence: text.slice(0, 240),
+      });
+    }
+  }
 
   for (const change of added) {
     const text = change.text.trim();
@@ -150,19 +181,76 @@ for (const file of report.files) {
 
 for (const file of report.files) {
   if (isExcluded(file.path)) continue;
-  const occurrences = new Map();
-  for (const change of file.changes ?? []) {
-    if (change.side !== 'added') continue;
-    const text = change.text.replace(/\s+/g, ' ').trim();
-    if (text.length < 12 || commentPattern.test(change.text) || isRepeatedBoilerplate(text)) continue;
-    const locations = occurrences.get(text) ?? [];
-    locations.push(change.line);
-    occurrences.set(text, locations);
+  const added = (file.changes ?? []).filter((change) => change.side === 'added');
+  const lineOccurrences = new Map();
+  const blockCandidates = new Map();
+  const runs = [];
+  let run = [];
+
+  function finishRun() {
+    if (run.length > 0) runs.push(run);
+    run = [];
   }
 
-  for (const [text, locations] of occurrences) {
+  for (const change of added) {
+    const text = change.text.replace(/\s+/g, ' ').trim();
+    const eligible = text.length > 0
+      && !commentPattern.test(change.text)
+      && !isRepeatedBoilerplate(text)
+      && !isDuplicateNoise(text);
+
+    if (!eligible) {
+      finishRun();
+      continue;
+    }
+
+    if (run.length > 0 && change.line !== run.at(-1).change.line + 1) finishRun();
+    run.push({ change, text });
+
+    if (text.length > 40) {
+      const locations = lineOccurrences.get(text) ?? [];
+      locations.push(change.line);
+      lineOccurrences.set(text, locations);
+    }
+  }
+  finishRun();
+
+  const triples = new Map();
+  for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+    for (let index = 0; index <= runs[runIndex].length - 3; index += 1) {
+      const key = JSON.stringify(runs[runIndex].slice(index, index + 3).map((entry) => entry.text));
+      const starts = triples.get(key) ?? [];
+      starts.push({ runIndex, index });
+      triples.set(key, starts);
+    }
+  }
+
+  for (const starts of triples.values()) {
+    for (let startIndex = 0; startIndex < starts.length; startIndex += 1) {
+      const first = starts[startIndex];
+      let second;
+      for (let otherIndex = startIndex + 1; otherIndex < starts.length; otherIndex += 1) {
+        const candidate = starts[otherIndex];
+        if (first.runIndex === candidate.runIndex && candidate.index < first.index + 3) continue;
+        second = candidate;
+        break;
+      }
+      if (!second) continue;
+
+      for (const start of [first, second]) {
+        const matchingRun = runs[start.runIndex];
+        for (let offset = 0; offset < 3; offset += 1) {
+          const entry = matchingRun[start.index + offset];
+          blockCandidates.set(entry.change.line, { blockLength: 3, evidence: entry.text });
+        }
+      }
+    }
+  }
+
+  for (const [text, locations] of lineOccurrences) {
     if (locations.length < 2) continue;
     for (const line of locations) {
+      if (blockCandidates.has(line)) continue;
       candidates.push({
         ruleId: 'SWEEP-105',
         severity: 'dusty',
@@ -173,6 +261,17 @@ for (const file of report.files) {
       });
     }
   }
+
+  for (const [line, block] of blockCandidates) {
+    candidates.push({
+      ruleId: 'SWEEP-105',
+      severity: 'dusty',
+      path: file.path,
+      line,
+      description: `Repeated ${block.blockLength}-line block; check whether the logic should be shared`,
+      evidence: block.evidence.slice(0, 240),
+    });
+  }
 }
 
 process.stdout.write(`${JSON.stringify({
@@ -181,3 +280,4 @@ process.stdout.write(`${JSON.stringify({
   skipped: report.skipped ?? [],
   note: 'Heuristic candidates only; verify context, behavior, and existing reuse opportunities before reporting or changing code.',
 }, null, 2)}\n`);
+process.stderr.write(`Code Sweeper: found ${candidates.length.toLocaleString()} candidates from ${sizeSummary}.\n`);

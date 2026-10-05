@@ -92,7 +92,14 @@ function parseDiffPath(path) {
   return path.replace(/^[ab]\//, '');
 }
 
-function collectUntracked() {
+function jsTsStem(path) {
+  const name = basename(path);
+  if (!/\.(?:[cm]?[jt]sx?)$/i.test(name)) return undefined;
+  const stem = name.replace(/\.d\.ts$/i, '').replace(/\.(?:[cm]?[jt]sx?)$/i, '');
+  return `${path.slice(0, path.length - name.length)}${stem}`.toLowerCase();
+}
+
+function collectUntracked(trackedJsTsStems) {
   const paths = runGit(['ls-files', '--others', '--exclude-standard', '-z'], { encoding: 'buffer' })
     .toString('utf8')
     .split('\0')
@@ -102,6 +109,10 @@ function collectUntracked() {
 
   for (const path of paths) {
     if (isExcluded(path)) continue;
+    if (trackedJsTsStems.has(jsTsStem(path))) {
+      skipped.push({ path, reason: 'tracked JavaScript/TypeScript sibling exists' });
+      continue;
+    }
     try {
       const content = readFileSync(path);
       if (content.length > maxUntrackedBytes || content.includes(0)) {
@@ -123,19 +134,24 @@ function collectUntracked() {
 }
 
 try {
+  const trackedJsTsStems = new Set(runGit(['ls-files', '-z'], { encoding: 'buffer' })
+    .toString('utf8')
+    .split('\0')
+    .map(jsTsStem)
+    .filter(Boolean));
   const comparisonBase = baseRef === 'HEAD'
     ? 'HEAD'
     : runGit(['merge-base', baseRef, 'HEAD']).trim();
   const diffText = runGit(['diff', '--no-ext-diff', '--unified=0', comparisonBase, '--']);
   const files = parseDiff(diffText).filter((file) => !isExcluded(file.path));
-  const untracked = collectUntracked();
-  const trackedPaths = new Set(files.map((file) => file.path));
+  const untracked = collectUntracked(trackedJsTsStems);
+  const changedPaths = new Set(files.map((file) => file.path));
 
   process.stdout.write(`${JSON.stringify({
     baseRef,
     requestedBaseRef,
     comparisonBase,
-    files: [...files, ...untracked.files.filter((file) => !trackedPaths.has(file.path))],
+    files: [...files, ...untracked.files.filter((file) => !changedPaths.has(file.path))],
     skipped: untracked.skipped,
     note: usedFallbackBase
       ? 'origin/HEAD was unavailable, so diff collection fell back to the working-tree comparison against HEAD and untracked non-ignored text files.'

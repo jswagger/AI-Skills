@@ -16,7 +16,7 @@ function scan(files) {
     input: JSON.stringify({ files }),
   });
   assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout);
+  return { ...JSON.parse(result.stdout), stderr: result.stderr };
 }
 
 test('Python tests and complexity patterns include top-level tests and long functions', (context) => {
@@ -43,8 +43,8 @@ test('Python tests and complexity patterns include top-level tests and long func
   assert(report.candidates.some((candidate) => candidate.ruleId === 'SWEEP-106' && candidate.path === path));
 });
 
-test('duplicate statements are scoped per file and ignore boilerplate and data files', () => {
-  const repeated = 'result = calculate_value(input_data)';
+test('duplicate statements require a long line or a repeated block and ignore common idioms', () => {
+  const repeated = 'result = calculate_value(input_data, include_metadata=true)';
   const report = scan([
     {
       path: 'src/first.py',
@@ -59,6 +59,14 @@ test('duplicate statements are scoped per file and ignore boilerplate and data f
         { side: 'added', line: 8, text: 'if __name__ == "__main__":' },
         { side: 'added', line: 9, text: 'sut = create_subject()' },
         { side: 'added', line: 10, text: 'sut = create_subject()' },
+        { side: 'added', line: 11, text: 'await waitFor(() => ready)' },
+        { side: 'added', line: 12, text: 'await waitFor(() => ready)' },
+        { side: 'added', line: 13, text: '});' },
+        { side: 'added', line: 14, text: '});' },
+        { side: 'added', line: 15, text: 'label: "value",' },
+        { side: 'added', line: 16, text: 'label: "value",' },
+        { side: 'added', line: 17, text: 'short = one' },
+        { side: 'added', line: 18, text: 'short = one' },
       ],
     },
     { path: 'src/second.py', changes: [{ side: 'added', line: 1, text: repeated }] },
@@ -73,4 +81,46 @@ test('duplicate statements are scoped per file and ignore boilerplate and data f
   assert.equal(duplicates.length, 2);
   assert(duplicates.every((candidate) => candidate.path === 'src/first.py'));
   assert.equal(report.candidates.some((candidate) => candidate.path.endsWith('.txt') || candidate.path.endsWith('.json')), false);
+  assert.equal(duplicates.some((candidate) => candidate.line >= 11), false);
+});
+
+test('duplicate multi-line blocks are reported, and any findings are JavaScript or TypeScript only', () => {
+  const block = [
+    'const first = calculateFirstValue(input);',
+    'const second = calculateSecondValue(input);',
+    'return combineValues(first, second);',
+  ];
+  const changes = [
+    ...block.map((text, index) => ({ side: 'added', line: index + 1, text })),
+    ...block.map((text, index) => ({ side: 'added', line: index + 5, text })),
+    { side: 'added', line: 9, text: 'const value = input as any;' },
+    { side: 'added', line: 10, text: 'function accept(value: any) {' },
+  ];
+  const report = scan([
+    { path: 'src/example.ts', changes },
+    { path: 'src/example.py', changes: [{ side: 'added', line: 1, text: 'value = input as any' }] },
+  ]);
+
+  assert.equal(report.candidates.filter((candidate) => candidate.ruleId === 'SWEEP-105').length, 6);
+  assert.equal(report.candidates.filter((candidate) => candidate.ruleId === 'SWEEP-107').length, 2);
+  assert.equal(
+    report.candidates.some((candidate) => candidate.path.endsWith('.py') && candidate.ruleId === 'SWEEP-107'),
+    false,
+  );
+  assert.match(report.stderr, /scanning 9 added lines across 2 files/);
+  assert.match(report.stderr, /Pass a base ref or adjust scan\.exclude/);
+  assert.match(report.stderr, /found \d+ candidates/);
+});
+
+test('large diffs announce their size and suggest scoping', () => {
+  const changes = Array.from({ length: 10000 }, (_, index) => ({
+    side: 'added',
+    line: index + 1,
+    text: `value_${index} = ${index}`,
+  }));
+  const report = scan([{ path: 'src/large.py', changes }]);
+
+  const largeDiffNotice = 'scanning 10,000 added lines across 1 file; large diffs may yield thousands of candidates';
+  assert(report.stderr.includes(largeDiffNotice));
+  assert.match(report.stderr, /Pass a base ref or adjust scan\.exclude/);
 });
