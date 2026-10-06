@@ -1,0 +1,59 @@
+{
+	"models": {
+		"basic": "haiku",
+		"advanced": "sonnet"
+	},
+	"diff": {
+		"baseRef": "HEAD",
+		"untrackedMaxBytes": 100000,
+		"maxDiffBytes": 102400
+	},
+	"scan": {
+		"exclude": [
+			"package-lock.json",
+			"yarn.lock",
+			"pnpm-lock.yaml",
+			"*.md",
+			"*.txt",
+			"*.json",
+			"*.sqlite*",
+			"*.db",
+			"*.csv",
+			"*.tsv",
+			"*.xml",
+			"*.yaml",
+			"*.yml",
+			"*.toml",
+			"*.tsbuildinfo",
+			"*.d.ts",
+			"*.snap",
+			"*.Designer.cs",
+			"**/bin/**",
+			"**/obj/**",
+			"**/node_modules/**"
+		],
+		"testFiles": {
+			"patterns": [
+				"*.test.*",
+				"*.spec.*",
+				"*Tests.cs",
+				"test_*.py",
+				"*_test.py",
+				"**/__tests__/**",
+				"**/test/**",
+				"**/tests/**"
+			]
+		},
+		"contextLines": 15
+	},
+	"rules": {
+		"disabled": [],
+		"severityOverrides": {}
+	},
+	"autoFix": false,
+	"repositoryContext": null,
+	"ticketContext": null,
+	"report": {
+		"outputDir": ".bug-hunter/reports"
+	}
+}
