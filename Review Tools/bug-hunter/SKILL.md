@@ -20,7 +20,7 @@ Read [config.json](./config.json) first. Key settings:
 
 - `autoFix` (default `false`): a hard gate. When `false`, **never edit any file**. When `true`, fix only 🔴 Probable Bugs where the correct fix is unambiguous, never 🟡, then tell the user to run their tests.
 - `diff.maxDiffBytes` (default 102400): size gate; see step 2.
-- `repositoryContext`: `null` skips it. Otherwise `{ fileNames, maxLinesPerFile, maxTotalLines }`; only files with those names in a changed file's folder or its parent are used.
+- `repositoryContext`: `null` skips it. Otherwise `{ fileNames, maxLinesPerFile, maxTotalLines }`; matching files are searched from each changed file's folder up to the repository root, with the five nearest unique files included at most.
 - `ticketContext`: `null` skips it. Otherwise `{ path, ticketName, maxLines }`; the ticket file is `<ticketName>.md` or `.txt`. A `--ticket <name>` argument overrides `ticketName`.
 - `rules.disabled`, `rules.severityOverrides`, and inline `bug-hunter-ignore[: RULE]` comments tune script noise.
 - `models.basic` / `models.advanced`: preferred model selectors. If model-selectable subagents are unavailable, do both passes yourself and do not claim a model switch.
@@ -96,6 +96,6 @@ node "$S/build-packets.mjs"    --config "$CFG" --diff "$RUN/diff.json" --scan "$
 
 ## Script output reference
 
-`scan-patterns` rules are change-based signals, not a lint set: `REMOVED_GUARD`, `REMOVED_AWAIT`, `REMOVED_ERROR_HANDLING`, `REMOVED_CLEANUP`, `REMOVED_EARLY_EXIT` (hint), `BEHAVIOR_CHANGE_PAIR`, `SIGNATURE_CHANGED` (hint; feeds `find-callers`), `REMOVED_TEST_ASSERTION`, `TEST_DISABLED`. Caller matching is by name, so treat `callers` as leads. Hunks that only touch comments, imports, blank lines, or formatting are skipped. All scripts use Node.js built-ins only.
+`scan-patterns` rules are change-based signals, not a lint set: `REMOVED_GUARD`, `REMOVED_AWAIT`, `REMOVED_ERROR_HANDLING`, `REMOVED_CLEANUP`, `MISSING_RELEASE` (JavaScript/TypeScript loading-state completion paths), `REMOVED_EARLY_EXIT` (hint), `BEHAVIOR_CHANGE_PAIR`, `SIGNATURE_CHANGED` (hint; feeds `find-callers`), `REMOVED_TEST_ASSERTION`, `TEST_DISABLED`. Caller matching is by name, so treat `callers` as leads. Hunks that only touch comments, imports, blank lines, or formatting are skipped. All scripts use Node.js built-ins only.
 
 Run the script tests with `node --test "Review Tools/bug-hunter/test/*.test.mjs"`.

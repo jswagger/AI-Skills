@@ -2,12 +2,13 @@
 // Gathers optional repository and ticket context for the review agent.
 // Usage: collect-diff.mjs ... | gather-context.mjs --config <path> [--ticket <name>] [--root <dir>]
 //
-// Repository context uses a nearest-neighbor strategy: only the folder of each changed file and
-// its parent folder are searched for the configured context file names.
+// Repository context searches from each changed file's folder up to the repository root.
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isMain, loadConfig, parseArgs, readJsonInput, runCli } from './lib/common.mjs';
+
+const MAX_REPOSITORY_CONTEXT_FILES = 5;
 
 function readCapped(path, maxLines) {
   const lines = readFileSync(path, 'utf8').split(/\r?\n/);
@@ -23,43 +24,70 @@ function isFile(path) {
   }
 }
 
-/** Folder of the file, then its parent, never above `root`. */
-function neighborFolders(filePath, root) {
-  const folder = dirname(resolve(root, filePath));
-  const parent = dirname(folder);
-  const inside = (candidate) => !relative(root, candidate).startsWith('..');
-  return [folder, parent].filter((candidate, index, all) => inside(candidate) && all.indexOf(candidate) === index);
+/** Folders from the changed file's folder to `root`, without crossing the repository boundary. */
+function ancestorFolders(filePath, root) {
+  const rootPath = resolve(root);
+  let folder = dirname(resolve(rootPath, filePath));
+  const folders = [];
+  while (true) {
+    const fromRoot = relative(rootPath, folder);
+    if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) break;
+    folders.push(folder);
+    if (folder === rootPath) break;
+    const parent = dirname(folder);
+    if (parent === folder) break;
+    folder = parent;
+  }
+  return folders;
 }
 
 export function gatherRepositoryContext(changedPaths, settings, root = process.cwd(), alreadyLoaded = new Set()) {
   if (!settings) return { enabled: false, files: [], notes: [] };
   const { fileNames, maxLinesPerFile, maxTotalLines } = settings;
-  const seen = new Set();
+  const rootPath = resolve(root);
+  const candidatesByPath = new Map();
   const files = [];
   const notes = [];
   let totalLines = 0;
 
   for (const changedPath of [...changedPaths].sort()) {
-    for (const folder of neighborFolders(changedPath, root)) {
+    for (const [distance, folder] of ancestorFolders(changedPath, rootPath).entries()) {
       for (const name of fileNames) {
         const candidate = join(folder, name);
         const key = resolve(candidate);
-        if (seen.has(key) || !isFile(candidate)) continue;
-        seen.add(key);
-        if (alreadyLoaded.has(key)) {
-          notes.push(`Skipped ${relative(root, key)}: already loaded by the host.`);
-          continue;
+        if (!isFile(candidate)) continue;
+        const existing = candidatesByPath.get(key);
+        if (!existing || distance < existing.distance) {
+          candidatesByPath.set(key, {
+            key,
+            path: relative(rootPath, key).replaceAll('\\', '/'),
+            forFile: changedPath,
+            distance,
+          });
         }
-        const remaining = maxTotalLines - totalLines;
-        if (remaining <= 0) {
-          notes.push(`Skipped ${relative(root, key)}: total context budget of ${maxTotalLines} lines reached.`);
-          continue;
-        }
-        const { content, lineCount, truncated } = readCapped(candidate, Math.min(maxLinesPerFile, remaining));
-        totalLines += lineCount;
-        files.push({ path: relative(root, key).replaceAll('\\', '/'), forFile: changedPath, truncated, content });
       }
     }
+  }
+
+  const candidates = [...candidatesByPath.values()].sort((left, right) =>
+    left.distance - right.distance || left.path.localeCompare(right.path));
+  for (const candidate of candidates) {
+    if (alreadyLoaded.has(candidate.key)) {
+      notes.push(`Skipped ${candidate.path}: already loaded by the host.`);
+      continue;
+    }
+    if (files.length >= MAX_REPOSITORY_CONTEXT_FILES) {
+      notes.push(`Skipped remaining repository context files: maximum of ${MAX_REPOSITORY_CONTEXT_FILES} files reached.`);
+      break;
+    }
+    const remaining = maxTotalLines - totalLines;
+    if (remaining <= 0) {
+      notes.push(`Skipped remaining repository context files: total context budget of ${maxTotalLines} lines reached.`);
+      break;
+    }
+    const { content, lineCount, truncated } = readCapped(candidate.key, Math.min(maxLinesPerFile, remaining));
+    totalLines += lineCount;
+    files.push({ path: candidate.path, forFile: candidate.forFile, truncated, content });
   }
   return { enabled: true, files, totalLines, notes };
 }

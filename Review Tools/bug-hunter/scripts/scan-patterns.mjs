@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { createFileFilters } from '../../review-tools-common/file-filters.mjs';
 import { isMain, languageForPath, loadConfig, parseArgs, readJsonInput, runCli } from './lib/common.mjs';
 import { groupHunks, isTrivialHunk } from './lib/hunks.mjs';
-import { analyzeHunk } from './lib/rules-regression.mjs';
+import { analyzeFileChanges, analyzeHunk } from './lib/rules-regression.mjs';
 
 const SCHEMA_VERSION = 1;
 const TEST_FILE_RULES = new Set(['REMOVED_TEST_ASSERTION', 'TEST_DISABLED']);
@@ -47,11 +47,27 @@ export function scanFile(file, { isTestFile, disabledRules = new Set(), severity
     if (hunk.added.length > 0) behaviorChanged = true;
     const ignored = ignoredRules(hunk);
     if (ignored === 'all') continue;
-    for (const finding of analyzeHunk(hunk, { language, isTest })) {
+    for (const finding of analyzeHunk(hunk, { language, isTest, fileChanges: file.changes })) {
       if (disabledRules.has(finding.rule) || ignored.has(finding.rule)) continue;
       if (isTest && !TEST_FILE_RULES.has(finding.rule)) continue;
       // Deleting a whole file only matters for the exported symbols callers may still use.
       if (file.status === 'deleted' && finding.rule !== 'SIGNATURE_CHANGED') continue;
+      findings.push({
+        file: file.path,
+        ...finding,
+        severity: severityOverrides[finding.rule] ?? finding.severity,
+      });
+    }
+  }
+  if (!isTest) {
+    const hunkByAddedLine = new Map(groupHunks(file.changes).flatMap((hunk) => hunk.added.map((line) => [line.line, hunk])));
+    for (const finding of analyzeFileChanges(file.changes, { language })) {
+      if (disabledRules.has(finding.rule)) continue;
+      const ownerHunk = hunkByAddedLine.get(finding.line);
+      if (ownerHunk) {
+        const ignored = ignoredRules(ownerHunk);
+        if (ignored === 'all' || ignored.has(finding.rule)) continue;
+      }
       findings.push({
         file: file.path,
         ...finding,

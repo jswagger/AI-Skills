@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { groupHunks, isTrivialHunk, isWholeDeclarationRemoval } from '../scripts/lib/hunks.mjs';
-import { analyzeHunk, parseSignature } from '../scripts/lib/rules-regression.mjs';
+import { analyzeFileChanges, analyzeHunk, parseSignature } from '../scripts/lib/rules-regression.mjs';
 
 const removed = (line, text) => ({ side: 'removed', line, text });
 const added = (line, text) => ({ side: 'added', line, text });
 
 function analyze(changes, language = 'javascript', isTest = false) {
-  return groupHunks(changes)
+  const findings = groupHunks(changes)
     .filter((hunk) => !isTrivialHunk(hunk))
-    .flatMap((hunk) => analyzeHunk(hunk, { language, isTest }));
+    .flatMap((hunk) => analyzeHunk(hunk, { language, isTest, fileChanges: changes }));
+  return [...findings, ...analyzeFileChanges(changes, { language })];
 }
 
 const rulesOf = (findings) => findings.map((finding) => finding.rule);
@@ -77,6 +78,71 @@ test('REMOVED_GUARD ignores removed comments and deleted whole functions', () =>
     removed(1, 'function old(x) {'), removed(2, '  if (x === null) return;'), removed(3, '  try { go(); } catch (e) {}'), removed(4, '}'),
   ];
   assert.deepEqual(analyze(deleted), []);
+});
+
+test('REMOVED_GUARD is suppressed when an equivalent guard protects work in the called helper', () => {
+  const moved = [
+    removed(1, '  if (!user) return null;'), added(1, '  return renderUser(user);'),
+    added(10, 'function renderUser(user) {'), added(11, '  if (!user) return null;'),
+    added(12, '  return render(user);'), added(13, '}'),
+  ];
+  assert.equal(analyze(moved).some((finding) => finding.rule === 'REMOVED_GUARD'), false);
+
+  const arrowHelper = [
+    removed(1, '  if (!user) return null;'), added(1, '  return renderUser(user);'),
+    added(10, 'const renderUser = user => {'), added(11, '  if (!user) return null;'),
+    added(12, '  return render(user);'), added(13, '};'),
+  ];
+  assert.equal(analyze(arrowHelper).some((finding) => finding.rule === 'REMOVED_GUARD'), false);
+});
+
+test('REMOVED_GUARD remains for a missing guard or a similar guard on unrelated work', () => {
+  const removedGuard = [removed(1, '  if (!user) return null;'), added(1, '  render(user);')];
+  const unrelatedHelper = [
+    removed(1, '  if (!user) return null;'), added(1, '  render(user);'),
+    added(10, 'function checkOther(value) {'), added(11, '  if (!value) return null;'),
+    added(12, '  return log(value);'), added(13, '}'),
+  ];
+  const unrelatedOperation = [
+    removed(1, '  if (!user) return null;'), added(1, '  return renderUser(user, other);'),
+    added(10, 'function renderUser(user, other) {'), added(11, '  if (!user) return null;'),
+    added(12, '  return render(other);'), added(13, '}'),
+  ];
+  assert.ok(analyze(removedGuard).some((finding) => finding.rule === 'REMOVED_GUARD'));
+  assert.ok(analyze(unrelatedHelper).some((finding) => finding.rule === 'REMOVED_GUARD'));
+  assert.ok(analyze(unrelatedOperation).some((finding) => finding.rule === 'REMOVED_GUARD'));
+});
+
+test('MISSING_RELEASE accepts finally and flags uncovered success or error completion paths', () => {
+  const paired = [
+    added(1, 'async function load() {'), added(2, '  setLoading(true);'), added(3, '  try {'),
+    added(4, '    await request();'), added(5, '  } finally {'), added(6, '    setLoading(false);'),
+    added(7, '  }'), added(8, '}'),
+  ];
+  const missingSuccess = [
+    added(1, 'function load() {'), added(2, '  setLoading(true);'), added(3, '  if (!ready) return;'),
+    added(4, '  setLoading(false);'), added(5, '}'),
+  ];
+  const missingFailure = [
+    added(1, 'async function load() {'), added(2, '  setLoading(true);'), added(3, '  try {'),
+    added(4, '    await request();'), added(5, '    setLoading(false);'),
+    added(6, '  } catch (error) {'), added(7, '    report(error);'), added(8, '  }'), added(9, '}'),
+  ];
+  const missingSuccessOnly = [
+    added(1, 'async function load() {'), added(2, '  setLoading(true);'), added(3, '  try {'),
+    added(4, '    await request();'), added(5, '  } catch (error) {'), added(6, '    setLoading(false);'),
+    added(7, '  }'), added(8, '}'),
+  ];
+  assert.equal(analyze(paired).some((finding) => finding.rule === 'MISSING_RELEASE'), false);
+  assert.ok(analyze(missingSuccess).some((finding) => finding.rule === 'MISSING_RELEASE'));
+  assert.ok(analyze(missingFailure).some((finding) => finding.rule === 'MISSING_RELEASE'));
+  assert.ok(analyze(missingSuccessOnly).some((finding) => finding.rule === 'MISSING_RELEASE'));
+});
+
+test('MISSING_RELEASE is limited to JavaScript and TypeScript', () => {
+  const transition = [added(1, 'setLoading(true);')];
+  assert.deepEqual(analyzeFileChanges(transition, { language: 'python' }), []);
+  assert.deepEqual(analyzeFileChanges(transition, { language: 'csharp' }), []);
 });
 
 // --- REMOVED_AWAIT / REMOVED_ERROR_HANDLING --------------------------------------------------

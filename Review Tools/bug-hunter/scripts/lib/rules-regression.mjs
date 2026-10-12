@@ -1,7 +1,7 @@
 // Regression rules: signals derived from what a diff removed or changed, not from generic patterns.
 // Each rule receives one non-trivial hunk and returns findings (without file/path, added by the caller).
 
-import { anchorLine, isCommentLine, isWholeDeclarationRemoval } from './hunks.mjs';
+import { anchorLine, groupHunks, isCommentLine, isWholeDeclarationRemoval } from './hunks.mjs';
 
 const GUARD = {
   javascript: /(?:[=!]==?\s*(?:null|undefined)\b|\?\.|\?\?|\bif\s*\(\s*!\s*[\w$.]+\s*\)|\btypeof\s+[\w$.]+\s*[=!]==?)/g,
@@ -60,6 +60,131 @@ function removedGuard(hunk, language) {
   if (!pattern) return [];
   return netRemovedMatches(hunk, pattern).map((line) => removedFinding(hunk, line, 'REMOVED_GUARD', 'MEDIUM',
     'A null/undefined/type guard was removed without an equivalent being added in the same change. Confirm the value can no longer be missing.'));
+}
+
+const normalizeCode = (text) => text.replace(/\s+/g, '');
+
+function guardAndExit(text) {
+  const match = text.match(/\bif\s*\((.*?)\)\s*\{?\s*(return|throw)\b([^;{}]*);?/);
+  if (!match) return undefined;
+  return { condition: match[1], effect: `${match[2]}${match[3]}` };
+}
+
+function addedFunctions(changes) {
+  const lines = changes.filter((line) => line.side === 'added');
+  const functions = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const header = lines[index].text.match(/^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)|^\s*(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>\s*\{|^\s*(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?(\w+)\s*=>\s*\{/);
+    if (!header) continue;
+    const name = header[1] ?? header[3] ?? header[5];
+    const params = (header[2] ?? header[4] ?? header[6]).split(',').map((param) => param.trim().split(/[:=]/)[0].trim()).filter(Boolean);
+    const body = [];
+    let depth = 0;
+    let started = false;
+    for (let bodyIndex = index; bodyIndex < lines.length; bodyIndex += 1) {
+      const line = lines[bodyIndex];
+      body.push(line);
+      const code = line.text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '');
+      const delta = (code.match(/\{/g)?.length ?? 0) - (code.match(/\}/g)?.length ?? 0);
+      depth += delta;
+      started ||= delta > 0;
+      if (started && depth === 0) break;
+    }
+    if (started && depth === 0) functions.push({ name, params, body });
+  }
+  return functions;
+}
+
+function blockEndIndex(lines, startIndex) {
+  let depth = 0;
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const code = lines[index].text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, '');
+    depth += (code.match(/\{/g)?.length ?? 0) - (code.match(/\}/g)?.length ?? 0);
+    if (index > startIndex && depth <= 0) return index;
+  }
+  return lines.length - 1;
+}
+
+function guardMovedToAddedHelper(hunk, removedLine, fileChanges) {
+  const oldGuard = guardAndExit(removedLine.text);
+  if (!oldGuard) return false;
+  const helpers = addedFunctions(fileChanges);
+  for (const callLine of hunk.added) {
+    for (const helper of helpers) {
+      const returnedCall = new RegExp(`\\breturn\\s+(?:await\\s+)?${helper.name}\\s*\\(([^)]*)\\)`);
+      const call = callLine.text.match(returnedCall);
+      if (!call) continue;
+      const args = call[1].split(',').map((arg) => arg.trim());
+      const substitutions = new Map(helper.params.map((param, index) => [param, args[index] ?? '']));
+      for (let guardIndex = 0; guardIndex < helper.body.length; guardIndex += 1) {
+        const helperGuard = guardAndExit(helper.body[guardIndex].text);
+        if (!helperGuard || normalizeCode(helperGuard.effect) !== normalizeCode(oldGuard.effect)) continue;
+        const mappedCondition = helperGuard.condition.replace(/\b[A-Za-z_$][\w$]*\b/g, (token) => substitutions.get(token) ?? token);
+        if (normalizeCode(mappedCondition) !== normalizeCode(oldGuard.condition)) continue;
+        const guardedParams = helper.params.filter((param) => new RegExp(`\\b${param}\\b`).test(helperGuard.condition));
+        const guardedWork = helper.body.slice(guardIndex + 1).some(({ text }) => {
+          const returnedValue = text.match(/^\s*return\s+(.+?);?\s*$/)?.[1];
+          return returnedValue && guardedParams.some((param) => new RegExp(`\\b${param}\\b`).test(returnedValue));
+        });
+        if (guardedWork) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function missingStateReleases(changes) {
+  const added = changes.filter((line) => line.side === 'added');
+  const transitions = added.flatMap((line) => {
+    const match = line.text.match(/\b([A-Za-z_$][\w$]*(?:Loading|loading))\s*\(\s*(true|false)\s*\)/i);
+    return match ? [{ line, setter: match[1], value: match[2].toLowerCase() }] : [];
+  });
+  const functions = addedFunctions(changes);
+  const scopeFor = (line) => functions.find((fn) => fn.body.some((entry) => entry.line === line.line))?.body
+    ?? groupHunks(changes).find((hunk) => hunk.added.some((entry) => entry.line === line.line))?.added
+    ?? [line];
+  const findings = [];
+  for (const acquire of transitions.filter((transition) => transition.value === 'true')) {
+    const scope = scopeFor(acquire.line);
+    const acquireIndex = scope.findIndex((line) => line.line === acquire.line.line);
+    const releases = transitions.filter((transition) => transition.value === 'false'
+      && transition.setter === acquire.setter
+      && scope.some((line) => line.line === transition.line.line));
+    const releaseIndexes = releases.map((release) => scope.findIndex((line) => line.line === release.line.line)).filter((index) => index > acquireIndex);
+    const finallyIndex = scope.findIndex((line, index) => index > acquireIndex && /\bfinally\s*\{?/.test(line.text));
+    const finallyRelease = finallyIndex >= 0 && releaseIndexes.some((index) => index > finallyIndex);
+    const tryIndex = scope.findIndex((line, index) => index > acquireIndex && /\btry\s*\{?/.test(line.text));
+    const catchIndex = scope.findIndex((line, index) => index > acquireIndex && /\bcatch\s*\(/.test(line.text));
+    let pathsCovered = false;
+    if (catchIndex >= 0 && tryIndex >= 0) {
+      const catchEnd = blockEndIndex(scope, catchIndex);
+      const tryReleases = releaseIndexes.filter((index) => index > tryIndex && index < catchIndex);
+      const catchReleases = releaseIndexes.filter((index) => index > catchIndex && index < catchEnd);
+      const afterCatchRelease = releaseIndexes.filter((index) => index > catchEnd);
+      const tryEarlyReturn = scope.slice(tryIndex + 1, catchIndex).some((line) => /\breturn\b/.test(line.text));
+      const catchEarlyExit = scope.slice(catchIndex + 1, catchEnd).some((line) => /\b(?:return|throw)\b/.test(line.text));
+      const tryCovered = tryReleases.some((index) => !scope.slice(tryIndex + 1, index).some((line) => /\breturn\b/.test(line.text)))
+        || (afterCatchRelease.length > 0 && !tryEarlyReturn);
+      const catchCovered = catchReleases.some((index) => !scope.slice(catchIndex + 1, index).some((line) => /\b(?:return|throw)\b/.test(line.text)))
+        || (afterCatchRelease.length > 0 && !catchEarlyExit);
+      pathsCovered = tryCovered && catchCovered;
+    } else {
+      const releaseIndex = releaseIndexes[0];
+      pathsCovered = releaseIndex !== undefined && !scope.slice(acquireIndex + 1, releaseIndex)
+        .some((line) => /\b(?:return|throw)\b/.test(line.text));
+    }
+    if (finallyRelease || pathsCovered) continue;
+    findings.push({
+      rule: 'MISSING_RELEASE',
+      severity: 'MEDIUM',
+      confidence: 'high',
+      line: acquire.line.line,
+      side: 'added',
+      snippet: `+ ${acquire.line.text.trim()}`,
+      message: `Loading state is set to true without a matching ${acquire.setter}(false) on every visible completion path.`,
+    });
+  }
+  return findings;
 }
 
 function removedAwait(hunk) {
@@ -277,14 +402,17 @@ function signatureChanges(hunk, language) {
 }
 
 /** All regression rules for one non-trivial hunk. */
-export function analyzeHunk(hunk, { language, isTest }) {
+export function analyzeHunk(hunk, { language, isTest, fileChanges = [] }) {
   if (isWholeDeclarationRemoval(hunk)) return signatureChanges(hunk, language);
   const pairs = behaviorChangePairs(hunk);
   const pairedRemovedLines = new Set(pairs.map((finding) => finding.removedLine));
   // A pair finding is more specific than a guard/await/handler removal on the same line.
   const unpaired = (finding) => !pairedRemovedLines.has(finding.removedLine);
   const specific = [
-    ...removedGuard(hunk, language),
+    ...removedGuard(hunk, language).filter((finding) => {
+      const removedLine = hunk.removed.find((line) => line.line === finding.removedLine);
+      return !removedLine || !guardMovedToAddedHelper(hunk, removedLine, fileChanges);
+    }),
     ...removedAwait(hunk),
     ...removedErrorHandling(hunk, language),
     ...removedCleanup(hunk, language),
@@ -300,4 +428,10 @@ export function analyzeHunk(hunk, { language, isTest }) {
     ...earlyExits,
     ...signatureChanges(hunk, language),
   ];
+}
+
+/** Change-level JS/TS checks that need completion paths spanning multiple hunks. */
+export function analyzeFileChanges(changes, { language }) {
+  if (!['javascript', 'typescript'].includes(language)) return [];
+  return missingStateReleases(changes);
 }

@@ -27,6 +27,28 @@ test('scanCollected reports findings with file paths, languages and a rule summa
   assert.deepEqual(report.summary.findingsByRule, { REMOVED_GUARD: 1 });
 });
 
+test('scanCollected uses helper context and reports a missing loading release once per file', () => {
+  const changes = [
+    removed(1, '  if (!user) return null;'), added(1, '  return renderUser(user);'),
+    added(10, 'function renderUser(user) {'), added(11, '  if (!user) return null;'),
+    added(12, '  return render(user);'), added(13, '}'),
+    added(20, 'async function load() {'), added(21, '  setLoading(true);'),
+    added(22, '  await request();'), added(23, '}'),
+  ];
+  const report = scanCollected({ files: [file('src/Widget.tsx', changes)] }, config());
+  assert.deepEqual(report.script_findings.map((finding) => finding.rule), ['MISSING_RELEASE']);
+  assert.deepEqual(report.summary.findingsByRule, { MISSING_RELEASE: 1 });
+});
+
+test('inline ignores apply to file-level loading findings', () => {
+  const changes = [
+    added(1, 'function load() {'), added(2, '  setLoading(true);'),
+    added(3, '  request(); // bug-hunter-ignore: MISSING_RELEASE'), added(4, '}'),
+  ];
+  const report = scanCollected({ files: [file('src/Widget.tsx', changes)] }, config());
+  assert.deepEqual(report.script_findings, []);
+});
+
 test('scanCollected skips unsupported files and counts trivial hunks without analyzing them', () => {
   const report = scanCollected({
     files: [

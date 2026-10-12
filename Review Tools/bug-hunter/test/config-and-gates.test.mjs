@@ -74,7 +74,7 @@ test('repository context is skipped when settings are null', () => {
   assert.deepEqual(gatherRepositoryContext(['a.js'], null), { enabled: false, files: [], notes: [] });
 });
 
-test('repository context uses only the file folder and its parent (nearest neighbor)', (context) => {
+test('repository context walks from the file folder to the repository root', (context) => {
   const root = tempDir(context);
   write(root, 'CLAUDE.md', 'root rules');
   write(root, 'src/CLAUDE.md', 'src rules');
@@ -88,9 +88,33 @@ test('repository context uses only the file folder and its parent (nearest neigh
     root,
   );
   assert.deepEqual(result.files.map((file) => file.path).sort(), [
+    'CLAUDE.md',
+    'src/CLAUDE.md',
     'src/feature/CLAUDE.md',
     'src/feature/deep/CLAUDE.md',
   ]);
+});
+
+test('repository context selects at most five nearest files in deterministic order', (context) => {
+  const root = tempDir(context);
+  const folders = ['a/b/c/d/e', 'a/b/c/d', 'a/b/c', 'a/b', 'a', ''];
+  for (const folder of folders) write(root, join(folder, 'CLAUDE.md'), folder || 'root rules');
+
+  const result = gatherRepositoryContext(
+    ['a/b/c/d/e/file.js'],
+    { fileNames: ['CLAUDE.md'], maxLinesPerFile: 500, maxTotalLines: 1500 },
+    root,
+  );
+
+  assert.deepEqual(result.files.map((file) => file.path), [
+    'a/b/c/d/e/CLAUDE.md',
+    'a/b/c/d/CLAUDE.md',
+    'a/b/c/CLAUDE.md',
+    'a/b/CLAUDE.md',
+    'a/CLAUDE.md',
+  ]);
+  assert.equal(result.files.length, 5);
+  assert.match(result.notes[0], /maximum of 5 files reached/);
 });
 
 test('repository context dedupes shared neighbors and honors per-file and total caps', (context) => {
