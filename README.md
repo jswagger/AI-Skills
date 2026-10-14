@@ -3,6 +3,7 @@ A collection of generic skills to be utilized by agents in common development wo
 
 ## Review Tools
 
+- [Bug Hunter](Review%20Tools/bug-hunter/SKILL.md): review code changes for regressions and new bugs introduced by the change.
 - [Security Auditor](Review%20Tools/security-auditor/SKILL.md): review code changes for security vulnerabilities and risky patterns.
 - [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md): review code changes for clean-code issues and low-value tests.
 
