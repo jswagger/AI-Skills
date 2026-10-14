@@ -106,6 +106,8 @@ test('configured origin/HEAD is used automatically and falls back to HEAD when a
   assert.equal(fallbackReport.requestedBaseRef, 'origin/HEAD');
   assert.equal(fallbackReport.baseRef, 'HEAD');
   assert.equal(fallbackReport.comparisonBase, 'HEAD');
+  assert.equal(fallbackReport.baseCommitHash, head);
+  assert.match(fallbackReport.baseCommitDate, /^\d{4}-\d\d-\d\dT/);
   assert.match(fallbackReport.note, /fell back/);
 
   git(directory, ['update-ref', 'refs/remotes/origin/main', head]);
@@ -120,6 +122,8 @@ test('configured origin/HEAD is used automatically and falls back to HEAD when a
   assert.equal(detectedReport.requestedBaseRef, 'origin/HEAD');
   assert.equal(detectedReport.baseRef, 'origin/HEAD');
   assert.equal(detectedReport.comparisonBase, head);
+  assert.equal(detectedReport.baseCommitHash, head);
+  assert.match(detectedReport.baseCommitDate, /^\d{4}-\d\d-\d\dT/);
 });
 
 test('collector skips JS/TS generated artifacts and untracked files with tracked siblings', (context) => {
@@ -154,5 +158,8 @@ test('collector skips JS/TS generated artifacts and untracked files with tracked
   assert.equal(collectedPaths.includes('src/module.d.ts'), false);
   assert.equal(collectedPaths.includes('config/generated.js'), false);
   assert.equal(collectedPaths.includes('build.tsbuildinfo'), false);
+  assert.equal(report.excludedCount, 3);
+  assert.match(result.stderr, /resolved base HEAD to [a-f0-9]{40} \(\d{4}-\d\d-\d\dT/);
+  assert.match(result.stderr, /3 excluded files/);
   assert(report.skipped.some((file) => file.path === 'src/module.js' && /tracked.*sibling/.test(file.reason)));
 });

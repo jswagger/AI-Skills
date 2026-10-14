@@ -22,7 +22,7 @@ Edit `config.json` to tune review defaults. Obvious cleanup auto-fixes are enabl
 
 ### Use the Skill
 
-In VS Code Chat, run `/code-sweeper` to review changes against the configured base, or pass a target branch such as `/code-sweeper origin/main` for a pull request. The skill collects the diff, reports heuristic clean-code candidates, then reviews the evidence and reports Unclean, Dusty, and Clean sections. Treat automated matches as candidates, not confirmed issues.
+In VS Code Chat, run `/code-sweeper` to review changes against the configured default-branch base, or pass a target branch such as `/code-sweeper origin/main` for a pull request. Add `--no-fix` for a review-only run. The skill collects the diff, reports heuristic clean-code candidates, then reviews the evidence and reports Unclean, Dusty, and Clean sections. Treat automated matches as candidates, not confirmed issues.
 
 ### Run the Scripts Directly
 
@@ -32,7 +32,7 @@ From the target repository root, collect and scan changes with Node.js:
 node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/code-sweeper/config.json" origin/main | node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
 ```
 
-Use `HEAD` or omit the argument to compare working-tree changes to `HEAD`. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value.
+The Code Sweeper config defaults to `origin/HEAD`, resolved to the repository's default branch; the collector prints the resolved commit hash/date and excluded-file count. `HEAD` explicitly compares only working-tree changes to `HEAD`, which is often empty on a clean feature branch. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value. Pass `--no-fix` to the scanner for a review-only run.
 
 ### Security Auditor Setup
 

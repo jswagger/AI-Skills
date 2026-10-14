@@ -106,9 +106,13 @@ function collectUntracked(trackedJsTsStems) {
     .filter(Boolean);
   const files = [];
   const skipped = [];
+  let excludedCount = 0;
 
   for (const path of paths) {
-    if (isExcluded(path)) continue;
+    if (isExcluded(path)) {
+      excludedCount += 1;
+      continue;
+    }
     if (trackedJsTsStems.has(jsTsStem(path))) {
       skipped.push({ path, reason: 'tracked JavaScript/TypeScript sibling exists' });
       continue;
@@ -130,7 +134,7 @@ function collectUntracked(trackedJsTsStems) {
     }
   }
 
-  return { files, skipped };
+  return { files, skipped, excludedCount };
 }
 
 try {
@@ -142,15 +146,31 @@ try {
   const comparisonBase = baseRef === 'HEAD'
     ? 'HEAD'
     : runGit(['merge-base', baseRef, 'HEAD']).trim();
+  const [baseCommitHash, baseCommitDate] = runGit([
+    'show',
+    '-s',
+    '--format=%H %cI',
+    comparisonBase,
+  ]).trim().split(' ');
   const diffText = runGit(['diff', '--no-ext-diff', '--unified=0', comparisonBase, '--']);
-  const files = parseDiff(diffText).filter((file) => !isExcluded(file.path));
+  const diffFiles = parseDiff(diffText);
+  const files = diffFiles.filter((file) => !isExcluded(file.path));
   const untracked = collectUntracked(trackedJsTsStems);
   const changedPaths = new Set(files.map((file) => file.path));
+  const excludedCount = diffFiles.length - files.length + untracked.excludedCount;
+
+  process.stderr.write(
+    `Diff collector: resolved base ${baseRef} to ${baseCommitHash} (${baseCommitDate}); `
+      + `${excludedCount} excluded ${excludedCount === 1 ? 'file' : 'files'}.\n`,
+  );
 
   process.stdout.write(`${JSON.stringify({
     baseRef,
     requestedBaseRef,
     comparisonBase,
+    baseCommitHash,
+    baseCommitDate,
+    excludedCount,
     files: [...files, ...untracked.files.filter((file) => !changedPaths.has(file.path))],
     skipped: untracked.skipped,
     note: usedFallbackBase

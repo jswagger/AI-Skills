@@ -1,6 +1,6 @@
 {
 	"diff": {
-		"baseRef": "HEAD",
+		"baseRef": "origin/HEAD",
 		"untrackedMaxBytes": 100000
 	},
 	"scan": {
@@ -37,7 +37,8 @@
 			"maxLineLength": 120,
 			"maxCommentLength": 160,
 			"maxFunctionLines": 50,
-			"maxBooleanOperators": 3
+			"maxBooleanOperators": 3,
+			"maxFileLines": 500
 		}
 	},
 	"autoFix": {
