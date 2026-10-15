@@ -366,6 +366,10 @@ function isDuplicateNoise(text) {
     || /^(?:[$\w]+|'[^']+'|"[^"]+")\s*:\s*.+,$/.test(text);
 }
 
+function isYieldIdiom(text) {
+  return /^yield\s+(?:put|call)\s*\(/.test(text);
+}
+
 for (const file of report.files) {
   if (isExcluded(file.path)) continue;
   const testFile = isTestFile(file.path);
@@ -496,8 +500,7 @@ for (const file of report.files) {
     const eligible = text.length > 0
       && !commentPattern.test(change.text)
       && !isRepeatedBoilerplate(text)
-      && !isDuplicateNoise(text)
-      && !/^yield\s+(?:put|call)\s*\(/.test(text);
+      && !isDuplicateNoise(text);
 
     if (!eligible) {
       finishRun();
@@ -508,7 +511,7 @@ for (const file of report.files) {
     run.push({ change, text });
 
     if (text.length > 40
-      && !/^yield\s+(?:put|call)\s*\(/.test(text)
+      && !isYieldIdiom(text)
       && !callsNewHelper(text, helperNames)) {
       const locations = lineOccurrences.get(text) ?? [];
       locations.push(change.line);
@@ -572,7 +575,9 @@ for (const file of report.files) {
     if (occurrences.length < 2) continue;
     const allCovered = occurrences.every((start) => (coveredRanges.get(start.runIndex) ?? [])
       .some((range) => start.index >= range.start && start.index + block.sequence.length <= range.end));
-    if (allCovered || block.sequence.some((text) => callsNewHelper(text, helperNames))) continue;
+    if (allCovered
+      || block.sequence.every(isYieldIdiom)
+      || block.sequence.some((text) => callsNewHelper(text, helperNames))) continue;
 
     const first = occurrences[0];
     selectedBlocks.push({

@@ -32,8 +32,33 @@ function parseDiff(diffText) {
   let oldFilePath;
   let oldLine = 0;
   let newLine = 0;
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
   for (const line of diffText.split('\n')) {
+    if (currentFile && (oldRemaining > 0 || newRemaining > 0)) {
+      if (line.startsWith('-') && oldRemaining > 0) {
+        currentFile.changes.push({ side: 'removed', line: oldLine, text: line.slice(1) });
+        oldLine += 1;
+        oldRemaining -= 1;
+        continue;
+      }
+      if (line.startsWith('+') && newRemaining > 0) {
+        currentFile.changes.push({ side: 'added', line: newLine, text: line.slice(1) });
+        newLine += 1;
+        newRemaining -= 1;
+        continue;
+      }
+      if (line.startsWith(' ') && oldRemaining > 0 && newRemaining > 0) {
+        oldLine += 1;
+        newLine += 1;
+        oldRemaining -= 1;
+        newRemaining -= 1;
+        continue;
+      }
+      if (line.startsWith('\\')) continue;
+    }
+
     if (line.startsWith('--- ')) {
       oldFilePath = parseDiffPath(line.slice(4));
       continue;
@@ -57,20 +82,10 @@ function parseDiff(diffText) {
     const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
       oldLine = Number(hunk[1]);
+      oldRemaining = Number(hunk[2] ?? 1);
       newLine = Number(hunk[3]);
+      newRemaining = Number(hunk[4] ?? 1);
       continue;
-    }
-
-    if (!currentFile || line.startsWith('diff ') || line.startsWith('index ')) {
-      continue;
-    }
-
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      currentFile.changes.push({ side: 'added', line: newLine, text: line.slice(1) });
-      newLine += 1;
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      currentFile.changes.push({ side: 'removed', line: oldLine, text: line.slice(1) });
-      oldLine += 1;
     }
   }
 

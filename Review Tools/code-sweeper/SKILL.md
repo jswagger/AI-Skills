@@ -30,7 +30,8 @@ The defaults exclude common prose and data files, including `.txt`, `.json`, dat
    on standard error; for large diffs, narrow the review with a base ref or `scan.exclude`.
    SWEEP-105 reports one candidate per repeated contiguous block (with its start line, length, and
    occurrence count), and retains the 40-character floor for repeated statements while ignoring
-   short `yield put(...)`/`yield call(...)` idioms and calls to helpers newly declared in this diff.
+   `yield put(...)`/`yield call(...)` lines as single-statement repeats and blocks made only of such
+   lines, along with calls to helpers newly declared in this diff.
    SWEEP-107 detects `any` in annotations, generic arguments, and casts; replacing a specific type
    argument with `any` is a stronger signal, while `as T` assertions are lower-severity candidates.
    SWEEP-108 through SWEEP-110 identify trivial-only test assertions, duplicated `as any` object

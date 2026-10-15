@@ -47,6 +47,35 @@ test('collector parses added, modified, and deleted Git paths', (context) => {
   assert.deepEqual(files.get('delete.py').changes.map((change) => change.side), ['removed']);
 });
 
+test('collector preserves column-zero plus/minus content and subsequent line numbers', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'collect-diff-markers-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  git(directory, ['init', '-q']);
+  git(directory, ['config', 'user.name', 'Code Review Tests']);
+  git(directory, ['config', 'user.email', 'code-review-tests@example.invalid']);
+  writeFileSync(join(directory, 'markers.py'), 'head one\nhead two\n-- note about sql\nold();\ntail();\n');
+  git(directory, ['add', 'markers.py']);
+  git(directory, ['commit', '-qm', 'baseline']);
+  writeFileSync(join(directory, 'markers.py'), 'head one\nhead two\n++counter;\nfresh();\nmore();\ntail();\n');
+
+  const result = spawnSync(process.execPath, [collectorPath, '--config', codeSweeperConfigPath, 'HEAD'], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+
+  const report = JSON.parse(result.stdout);
+  const changes = report.files.find((file) => file.path === 'markers.py').changes;
+  assert.deepEqual(changes, [
+    { side: 'removed', line: 3, text: '-- note about sql' },
+    { side: 'removed', line: 4, text: 'old();' },
+    { side: 'added', line: 3, text: '++counter;' },
+    { side: 'added', line: 4, text: 'fresh();' },
+    { side: 'added', line: 5, text: 'more();' },
+  ]);
+});
+
 test('target refs compare from the merge base and retain working-tree changes', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'collect-merge-base-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));

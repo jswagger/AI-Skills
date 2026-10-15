@@ -117,6 +117,47 @@ test('duplicate multi-line blocks are reported, and any findings are JavaScript 
   assert.match(report.stderr, /found \d+ candidates/);
 });
 
+test('SWEEP-105 reports repeated blocks containing yield lines but ignores yield-only blocks', () => {
+  const mixedBlock = [
+    'const result = await fetchOrders(orgGuid, customerGuid);',
+    'yield put(ordersActions.setOrders(result.items, result.total));',
+    'yield put(ordersActions.setLoading(false));',
+  ];
+  const yieldOnlyBlock = [
+    'yield put(ordersActions.setLoading(true));',
+    'yield put(ordersActions.setError(null));',
+    'yield put(ordersActions.setOrders([], 0));',
+  ];
+  const changesFor = (lines) => [
+    ...lines.map((text, index) => ({ side: 'added', line: 10 + index, text })),
+    ...lines.map((text, index) => ({ side: 'added', line: 30 + index, text })),
+  ];
+  const mixedCandidates = scan([{
+    path: 'src/sagas/orders.ts',
+    changes: changesFor(mixedBlock),
+  }]).candidates.filter((candidate) => candidate.ruleId === 'SWEEP-105');
+  const yieldOnlyCandidates = scan([{
+    path: 'src/sagas/orders.ts',
+    changes: changesFor(yieldOnlyBlock),
+  }]).candidates.filter((candidate) => candidate.ruleId === 'SWEEP-105');
+  const repeatedYieldStatement = yieldOnlyBlock[0];
+  const singleStatementCandidates = scan([{
+    path: 'src/sagas/orders.ts',
+    changes: [10, 20, 30, 40].map((line) => ({
+      side: 'added',
+      line,
+      text: repeatedYieldStatement,
+    })),
+  }]).candidates.filter((candidate) => candidate.ruleId === 'SWEEP-105');
+
+  assert.equal(mixedCandidates.length, 1);
+  assert.equal(mixedCandidates[0].blockLength, 3);
+  assert.equal(mixedCandidates[0].occurrenceCount, 2);
+  assert.equal(mixedCandidates[0].line, 10);
+  assert.deepEqual(yieldOnlyCandidates, []);
+  assert.deepEqual(singleStatementCandidates, []);
+});
+
 test('duplicate blocks collapse to one occurrence-aware candidate and suppress helper/side-effect repeats', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'code-sweeper-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -153,7 +194,7 @@ test('duplicate blocks collapse to one occurrence-aware candidate and suppress h
 
   assert.equal(duplicates.length, 1);
   assert.equal(duplicates[0].line, 4);
-  assert.equal(duplicates[0].blockLength, 3);
+  assert.equal(duplicates[0].blockLength, 4);
   assert.equal(duplicates[0].occurrenceCount, 3);
   assert.equal(duplicates[0].enclosingFunctionChange, 'new');
   assert.equal(report.candidates.some((candidate) => /buildCustomerParams/.test(candidate.evidence)), false);
