@@ -1,75 +1,104 @@
 # AI-Skills
-A collection of generic skills to be utilized by agents in common development workflows
-
+Generic skills for AI agents in everyday development workflows.
 ## Review Tools
-
-- [Bug Hunter](Review%20Tools/bug-hunter/SKILL.md): review code changes for regressions and new bugs introduced by the change.
-- [Security Auditor](Review%20Tools/security-auditor/SKILL.md): review code changes for security vulnerabilities and risky patterns.
-- [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md): review code changes for clean-code issues and low-value tests.
-
-### Run Unit Tests
-
-Run the built-in Node.js test suites from the repository root with `node --test "Review Tools/code-sweeper/test/scan-patterns.test.mjs" "Review Tools/security-auditor/test/scan-patterns.test.mjs" "Review Tools/review-tools-common/test/collect-diff.test.mjs"`. This explicit file list works on Node 22 and avoids passing a test directory as a module. No third-party test dependencies are required.
-
-### Shared Helper Setup
-
-Both review skills use [review-tools-common](Review%20Tools/review-tools-common/) for diff collection and file filtering. Copy the complete folder into the target project's `.github/skills/review-tools-common/` directory (or `.agents/skills/review-tools-common/`) alongside whichever review skill folders you install.
-
-### Code Sweeper Setup
-
-To make the skill discoverable in a project, copy the complete `code-sweeper` folder into that project's `.github/skills/code-sweeper/` directory. The `.agents/skills/code-sweeper/` directory is also supported. Keep `SKILL.md`, `config.json`, and `scripts/` together so the skill can find its configuration and scripts.
-
-Edit `config.json` to tune review defaults. Obvious cleanup auto-fixes are enabled by default; test removal is disabled by default and can be enabled separately after contextual review.
-
-### Use the Skill
-
-In VS Code Chat, run `/code-sweeper` to review changes against the configured default-branch base, or pass a target branch such as `/code-sweeper origin/main` for a pull request. Add `--no-fix` for a review-only run. The skill collects the diff, reports heuristic clean-code candidates, then reviews the evidence and reports Unclean, Dusty, and Clean sections. Treat automated matches as candidates, not confirmed issues.
-
-### Run the Scripts Directly
-
-From the target repository root, collect and scan changes with Node.js:
-
-```sh
-node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/code-sweeper/config.json" origin/main | node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
+| Skill | Question it answers | Report sections |
+| --- | --- | --- |
+| [Bug Hunter](Review%20Tools/bug-hunter/SKILL.md) | What did this change break, and what new bugs did it add? | 🔴 Probable Bugs · 🟡 Suspicious · 🟢 Clean |
+| [Code Sweeper](Review%20Tools/code-sweeper/SKILL.md) | Is this change clean, simple, and well tested? | 🔴 Unclean · 🟡 Dusty · 🟢 Clean |
+| [Security Auditor](Review%20Tools/security-auditor/SKILL.md) | Does this change introduce vulnerabilities? | 🔴 High Risk · 🟡 Suspicious · 🟢 Clean |
+Each skill reviews only your change, not the whole repo, and they don't overlap: Bug Hunter skips style and vulnerabilities, Code Sweeper skips bugs and security, and so on.
+All three work the same way:
+1. **Collect** the diff against a base branch (`review-tools-common`).
+2. **Scan** it with fast pattern heuristics that flag *candidates*.
+3. **Review** each candidate in context. Matches are leads, not verdicts.
+## Install
+Copy these folders into your project's `.github/skills/` (or `.agents/skills/`):
+- `review-tools-common` (required by all three skills)
+- `bug-hunter`, `code-sweeper`, and/or `security-auditor`
+Keep each skill's `SKILL.md`, `config.json`, and `scripts/` together. Bug Hunter also needs its `references/` folder.
+## Use
+In VS Code Chat:
 ```
-
-The Code Sweeper config defaults to `origin/HEAD`, resolved to the repository's default branch; the collector prints the resolved commit hash/date and excluded-file count. `HEAD` explicitly compares only working-tree changes to `HEAD`, which is often empty on a clean feature branch. A target ref such as `origin/main` is resolved to `git merge-base <ref> HEAD`, so target-only commits are excluded while feature-branch and local changes remain included. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not apply fixes or decide whether tests are low-value. Pass `--no-fix` to the scanner for a review-only run.
-
-### Security Auditor Setup
-
-To make the skill discoverable in a project, copy the complete `security-auditor` folder into that project's `.github/skills/security-auditor/` directory. The `.agents/skills/security-auditor/` directory is also supported. Keep `SKILL.md`, `config.json`, and `scripts/` together so the skill can find its configuration and scripts.
-
-Edit `config.json` to choose the model roles and review defaults:
-
-```json
-{
-	"models": {
-		"basic": "haiku",
-		"advanced": "sonnet"
-	},
-	"diff": {
-		"baseRef": "origin/HEAD",
-		"untrackedMaxBytes": 100000
-	},
-	"scope": {
-		"maxRelatedFiles": 5,
-		"maxRelationshipHops": 1
-	}
-}
+/bug-hunter origin/main --ticket PROJ-123
+/code-sweeper origin/main
+/code-sweeper --no-fix          # review only, no edits
+/security-auditor origin/main
 ```
-
-Set `models.basic` and `models.advanced` to the model selectors available in your agent environment. Defaults are `haiku` for common-pattern review and `sonnet` for architectural review; subagents should receive the collected diff and scanner candidates without recollecting. Set `scan.projectStack` for the target repository (`backend`, `frontend`, `full-stack`, or `unknown`); the shipped default is `backend`. The scanner recognizes JavaScript/TypeScript, Python, and C# source files, detecting languages per changed file so language-specific heuristics only run on matching files. Coverage is heuristic and varies by language; it is not exhaustive. `diff.baseRef` is used when no base is supplied; the Security Auditor defaults to `origin/HEAD` and falls back to `HEAD` if unavailable. The scope values guide how far the review follows related code.
-
-### Use the Skill
-
-In VS Code Chat, run `/security-auditor` to review changes against the configured base, or pass a target branch such as `/security-auditor origin/main` for a pull request. The skill collects the diff, runs its pattern scanner, then reviews the evidence and reports High Risk, Suspicious, and Clean sections. Treat automated matches as candidates for review, not confirmed vulnerabilities.
-
-### Run the Scripts Directly
-
-From the target repository root, collect and scan changes with Node.js:
-
-```sh
-node ".github/skills/review-tools-common/collect-diff.mjs" --config ".github/skills/security-auditor/config.json" origin/main | node ".github/skills/security-auditor/scripts/scan-patterns.mjs"
+Leave off the base ref to use the configured default branch.
+Or run the scripts directly from your repo root:
+```bash
+node ".github/skills/review-tools-common/collect-diff.mjs" \
+  --config ".github/skills/code-sweeper/config.json" origin/main \
+  | node ".github/skills/code-sweeper/scripts/scan-patterns.mjs"
 ```
-
-Pass a target ref such as `origin/main` to compare from `git merge-base <ref> HEAD`, excluding target-only commits while retaining feature-branch and local changes. With no argument, the Security Auditor uses `origin/HEAD`, falling back to `HEAD` when that ref is unavailable. Untracked, non-ignored text files are included; binary files and oversized untracked files are skipped. The scanner prints heuristic candidates as JSON; it does not perform the full contextual review or produce the final report on its own.
+Scanners print candidates as JSON. They never apply fixes or judge intent on their own. Bug Hunter runs a longer script pipeline; see its [SKILL.md](Review%20Tools/bug-hunter/SKILL.md).
+## How the diff is chosen
+- With no argument, the base is `origin/HEAD` (your default branch).
+- A ref such as `origin/main` is compared from `git merge-base <ref> HEAD`, so target-only commits are excluded.
+- Passing `HEAD` compares only the working tree, which is often empty on a clean feature branch.
+- Untracked, non-ignored text files are included. Binary and oversized files are skipped.
+## Bug Hunter
+A regression safety net. It looks for removed guards, dropped awaits, changed contracts, and broken callers, then checks the change against your ticket's acceptance criteria.
+| Rule | Flags |
+| --- | --- |
+| `REMOVED_GUARD` | A null/validity check was removed |
+| `REMOVED_AWAIT` | An `await` was dropped |
+| `REMOVED_ERROR_HANDLING` | Error handling was removed |
+| `REMOVED_CLEANUP` | Cleanup or disposal was removed |
+| `MISSING_RELEASE` | A JS/TS loading state may never complete |
+| `REMOVED_EARLY_EXIT` | An early return was removed (hint) |
+| `BEHAVIOR_CHANGE_PAIR` | A `-`/`+` pair changes behavior |
+| `SIGNATURE_CHANGED` | A function contract changed (hint; triggers a caller search) |
+| `REMOVED_TEST_ASSERTION` | A test assertion was removed |
+| `TEST_DISABLED` | A test was disabled |
+How it works:
+- **Packets:** scripts rank findings by risk and bundle them with surrounding code and callers, so the agent reads only compact packets. Large diffs hit a size gate and ask whether to review everything or only the riskiest changes.
+- **Two passes:** a basic model triages script findings, then an advanced model reviews what's left. Without model-selectable subagents, the agent does both passes itself.
+- **Language notes:** JavaScript/TypeScript, C#, and Python.
+- **Reports:** saved to `.bug-hunter/reports` (add `.bug-hunter/` to `.gitignore`).
+| Setting | Purpose | Default |
+| --- | --- | --- |
+| `autoFix` | Fix unambiguous 🔴 bugs. When `false`, no files are ever edited | `false` |
+| `diff.maxDiffBytes` | Size gate for the diff | `102400` |
+| `ticketContext` | Ticket file used as acceptance criteria (`--ticket <name>` overrides) | `null` |
+| `repositoryContext` | Nearby docs for local patterns and invariants | `null` |
+| `rules.disabled` / `rules.severityOverrides` | Tune noisy rules | none |
+| `models.basic` / `models.advanced` | Model selectors for each pass | see `config.json` |
+| `report.outputDir` | Where reports are written | `.bug-hunter/reports` |
+Silence a single finding inline with `bug-hunter-ignore` or `bug-hunter-ignore: RULE_NAME`.
+## Code Sweeper
+Checks changed code for long lines, nested conditionals, heavy boolean logic, long comments, duplication, loose types, oversized files, and weak tests.
+| Rule | Flags |
+| --- | --- |
+| `SWEEP-101` | Long added line |
+| `SWEEP-102` | Nested conditional expression |
+| `SWEEP-103` | Many boolean operators on one line |
+| `SWEEP-104` | Long comment |
+| `SWEEP-105` | Repeated statement or block |
+| `SWEEP-106` | Long Python function |
+| `SWEEP-107` | `any` and type assertions (JS/TS) |
+| `SWEEP-108` | Test with only trivial assertions |
+| `SWEEP-109` | Duplicated `as any` test fixtures |
+| `SWEEP-110` | Near-identical sibling tests |
+| `SWEEP-111` | Large source file that grew |
+Auto-fix is on by default for clear, low-risk findings. Dusty findings are never auto-fixed, and test removal is off until you enable `tests.removeLowValue` in `config.json`.
+## Security Auditor
+Scans JavaScript/TypeScript, Python, and C# by file, so language-specific heuristics only run on matching files. Coverage is heuristic, not exhaustive.
+Set these in `config.json`:
+| Setting | Purpose | Default |
+| --- | --- | --- |
+| `models.basic` / `models.advanced` | Model selectors for pattern review and architectural review | `haiku` / `sonnet` |
+| `scan.projectStack` | `backend`, `frontend`, `full-stack`, or `unknown` | `backend` |
+| `scope.maxRelatedFiles` / `maxRelationshipHops` | How far review follows related code | `5` / `1` |
+## Tests
+Requires Node 22. No third-party dependencies.
+```bash
+node --test \
+  "Review Tools/bug-hunter/test/*.test.mjs" \
+  "Review Tools/code-sweeper/test/scan-patterns.test.mjs" \
+  "Review Tools/security-auditor/test/scan-patterns.test.mjs" \
+  "Review Tools/review-tools-common/test/collect-diff.test.mjs"
+```
+## License
+MIT
+Displaying README.md.
