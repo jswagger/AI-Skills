@@ -357,3 +357,17 @@ test('scanner preserves collection metadata and honors review-only arguments', (
   assert.equal(report.baseRef, undefined);
   assert.equal(report.excludedCount, 0);
 });
+test('SWEEP-112 flags a changed JS function over maxFunctionLines but not one exactly at the limit', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'code-sweeper-'));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const steps = (count) => Array.from({ length: count }, (_, index) => `  step${index}();`);
+  const lines = ['function tooLong() {', ...steps(51), '}', 'function atLimit() {', ...steps(50), '}'];
+  const path = join(directory, 'jobs.js');
+  writeFileSync(path, lines.join('\n'));
+  const report = scan([{ path, changes: lines.map((text, index) => ({ side: 'added', line: index + 1, text })) }]);
+
+  const flagged = report.candidates.filter((candidate) => candidate.ruleId === 'SWEEP-112');
+  assert.deepEqual(flagged.map(({ line, severity }) => ({ line, severity })), [{ line: 1, severity: 'dusty' }]);
+  assert.match(flagged[0].description, /tooLong has 51 nonblank body lines/);
+});

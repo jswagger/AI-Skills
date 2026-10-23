@@ -73,7 +73,9 @@ For each finding, include the rule ID when applicable, file and line, concise ev
 Run from the repository root:
 
 ```sh
-node "Review Tools/review-tools-common/collect-diff.mjs" --config "Review Tools/security-auditor/config.json" [base-ref] | node "Review Tools/security-auditor/scripts/scan-patterns.mjs"
+TOOLS="Review Tools"  # where the skills live; for example .github/skills once installed
+node "$TOOLS/review-tools-common/collect-diff.mjs" --config "$TOOLS/security-auditor/config.json" [base-ref] \
+  | node "$TOOLS/security-auditor/scripts/scan-patterns.mjs"
 ```
 
 The collector defaults to `diff.baseRef` in the supplied config, or `HEAD` when unset. This config uses `origin/HEAD` and falls back to `HEAD` when that remote-tracking ref is unavailable. With `HEAD`, it compares the working tree to `HEAD`; with another ref, it compares the working tree to `git merge-base <ref> HEAD`, excluding target-only commits while retaining feature-branch and local changes. It also includes untracked, non-ignored text files. Binary files and untracked files over the configured collection limit are skipped. The scanner reads JSON from standard input and prints JSON candidates to standard output. It reports locations and rule IDs, not verdicts.

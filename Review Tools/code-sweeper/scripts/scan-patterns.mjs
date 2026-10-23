@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { createFileFilters } from '../../review-tools-common/file-filters.mjs';
+import { findLongJsFunctions } from './function-length.mjs';
 
 const configPath = new URL('../config.json', import.meta.url);
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -306,6 +307,23 @@ function addTestCandidates(file) {
   }
 }
 
+function addJsFunctionCandidates(file) {
+  const addedLines = new Set((file.changes ?? [])
+    .filter((change) => change.side === 'added')
+    .map((change) => change.line));
+  const limit = thresholds.maxFunctionLines ?? 50;
+  for (const fn of findLongJsFunctions(getSourceLines(file), addedLines, limit)) {
+    addCandidate({
+      ruleId: 'SWEEP-112',
+      severity: 'dusty',
+      path: file.path,
+      line: fn.line,
+      description: `JS/TS function ${fn.name} has ${fn.bodyLines} nonblank body lines; consider splitting focused responsibilities`,
+      evidence: fn.signature.slice(0, 240),
+    });
+  }
+}
+
 function addPythonFunctionCandidates(file) {
   if (!file.path.endsWith('.py')) return;
 
@@ -380,6 +398,7 @@ for (const file of report.files) {
   addPythonFunctionCandidates(file);
 
   if (/\.(?:[cm]?[jt]sx?)$/i.test(file.path)) {
+    addJsFunctionCandidates(file);
     for (const change of added) {
       const text = change.text.trim();
       if (commentPattern.test(change.text)) continue;

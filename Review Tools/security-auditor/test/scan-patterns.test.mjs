@@ -177,3 +177,19 @@ test('testdata fixtures are excluded without hiding source JSON policies', () =>
   assert.equal(report.candidates.some((candidate) => candidate.path.startsWith('testdata/')), false);
   assert(report.candidates.some((candidate) => candidate.path === 'policies/access.json'));
 });
+test('CRIT-102 flags replace-based character blacklisting but not ordinary string cleanup', () => {
+  const lines = [
+    "const a = input.replace(/<script>/gi, '');",
+    "const b = input.replaceAll('<', '');",
+    "const c = input.replace('\"', '');",
+    "const d = input.replace(/-/g, ' ');",
+    "const e = input.replaceAll('_', ' ');",
+  ];
+  const report = scan([{
+    path: 'src/sanitize.js',
+    changes: lines.map((text, index) => ({ side: 'added', line: index + 1, text })),
+  }]);
+
+  const flagged = report.candidates.filter((candidate) => candidate.ruleId === 'CRIT-102').map((candidate) => candidate.line);
+  assert.deepEqual(flagged, [1, 2, 3]);
+});
